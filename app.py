@@ -3,72 +3,150 @@ import pandas as pd
 from fpdf import FPDF
 from datetime import datetime
 
-# 1. Page Configuration
+# 1. Page & Style Configuration
 st.set_page_config(page_title="Accounting Masterclass", layout="wide")
 
-# 2. Professional CSS (Formal T-Accounts)
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
+    
+    /* Score Card */
     .score-card { 
-        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); 
-        color: white; padding: 15px; border-radius: 10px; 
-        text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
+        background: #1e3a8a; color: white; padding: 15px; 
+        border-radius: 8px; text-align: center; font-weight: bold;
     }
-    .t-account-container { 
-        background-color: white; padding: 15px; border-radius: 8px; 
-        border: 2px solid #333; margin-bottom: 20px; 
-        box-shadow: 3px 3px 0px rgba(0,0,0,0.1); 
-    }
-    .t-title { 
-        text-align: center; font-weight: 800; border-bottom: 2px solid #000; 
-        color: #000; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px;
-    }
-    .t-table { width: 100%; border-collapse: collapse; font-family: 'Courier New', monospace; font-size: 0.9rem; }
-    .left-col { border-right: 2px solid #000; width: 50%; padding: 4px; vertical-align: top; }
-    .right-col { width: 50%; padding: 4px; vertical-align: top; }
-    .row-flex { display: flex; justify-content: space-between; }
-    .total-line { border-top: 1px solid #000; border-bottom: 4px double #000; font-weight: bold; margin-top: 8px; }
-    .bal-bf { font-weight: bold; margin-top: 5px; color: #1e3a8a; }
-    </style>
-    """, unsafe_allow_html=True)
 
-# 3. State Management
+    /* T-ACCOUNT STYLES */
+    .t-container {
+        background-color: white;
+        border: 2px solid #000;
+        margin-bottom: 20px;
+        font-family: 'Arial', sans-serif;
+    }
+    .t-header {
+        background-color: #1e3a8a;
+        color: white;
+        text-align: center;
+        font-weight: bold;
+        padding: 5px;
+        text-transform: uppercase;
+        border-bottom: 2px solid #000;
+    }
+    .t-body {
+        display: flex;
+        width: 100%;
+    }
+    .t-side {
+        width: 50%;
+        padding: 5px;
+    }
+    .t-left {
+        border-right: 2px solid #000;
+    }
+    .t-row {
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 1px dashed #ccc;
+        padding: 2px 0;
+        font-size: 0.9rem;
+    }
+    .t-total {
+        border-top: 2px solid #000;
+        border-bottom: 5px double #000;
+        font-weight: bold;
+        display: flex;
+        justify-content: space-between;
+        margin-top: 5px;
+        padding-top: 2px;
+    }
+    .bal-bf {
+        color: #1e3a8a;
+        font-weight: bold;
+        margin-top: 5px;
+        font-size: 0.9rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# 2. Session State Setup
 if 'level' not in st.session_state: st.session_state.level = 0
-if 'ledger' not in st.session_state: st.session_state.ledger = {}
+if 'ledger' not in st.session_state: st.session_state.ledger = {} # Structure: {AccName: {'Dr': [(Ref, Amt)], 'Cr': []}}
 if 'score' not in st.session_state: st.session_state.score = 0
 if 'mistakes' not in st.session_state: st.session_state.mistakes = 0
 if 'round_complete' not in st.session_state: st.session_state.round_complete = False
 
-# 4. 20-Round Progression Data
+# 3. The 20-Round Curriculum
 tasks = [
-    # SPRINT 1: THE FOUNDATION
-    {"q": "Owner invests £50,000 cash to start the business.", "dr": "Bank", "cr": "Capital", "amt": 50000},
+    # SPRINT 1: FOUNDATION
+    {"q": "Owner invests £50,000 cash to start business.", "dr": "Bank", "cr": "Capital", "amt": 50000},
     {"q": "Purchased premises for £30,000 cash.", "dr": "Premises", "cr": "Bank", "amt": 30000},
     {"q": "Bought office furniture for £2,000 cash.", "dr": "Fixtures", "cr": "Bank", "amt": 2000},
-    {"q": "Paid insurance premium of £1,200 via bank.", "dr": "Insurance", "cr": "Bank", "amt": 1200},
+    {"q": "Paid insurance premium £1,200 via bank.", "dr": "Insurance", "cr": "Bank", "amt": 1200},
     {"q": "Purchased inventory for £5,000 cash.", "dr": "Inventory", "cr": "Bank", "amt": 5000},
-    # SPRINT 2: CREDIT TRANSACTIONS
-    {"q": "Bought inventory for £4,000 on credit from 'SupplyCo'.", "dr": "Inventory", "cr": "Payables", "amt": 4000},
-    {"q": "Sold goods for £6,000 on credit to 'RetailPlus'.", "dr": "Receivables", "cr": "Sales", "amt": 6000},
-    {"q": "Returned £500 of faulty inventory to 'SupplyCo'.", "dr": "Payables", "cr": "Inventory", "amt": 500},
-    {"q": "Customer 'RetailPlus' returned £300 of goods.", "dr": "Sales", "cr": "Receivables", "amt": 300},
-    {"q": "Paid 'SupplyCo' £3,500 by cheque.", "dr": "Payables", "cr": "Bank", "amt": 3500},
-    # SPRINT 3: OPERATIONS & LOANS
-    {"q": "Received £5,700 from customer 'RetailPlus' in settlement.", "dr": "Bank", "cr": "Receivables", "amt": 5700},
-    {"q": "Paid monthly staff wages of £2,500.", "dr": "Wages", "cr": "Bank", "amt": 2500},
-    {"q": "Took out a bank loan for £10,000.", "dr": "Bank", "cr": "Loan", "amt": 10000},
-    {"q": "Paid bank loan interest of £100.", "dr": "Interest", "cr": "Bank", "amt": 100},
-    {"q": "Owner withdrew £1,000 for personal use.", "dr": "Drawings", "cr": "Bank", "amt": 1000},
-    # SPRINT 4: YEAR-END ADJUSTMENTS
-    {"q": "Year-End: Accrue for unpaid electricity £200.", "dr": "Electricity", "cr": "Accruals", "amt": 200},
-    {"q": "Year-End: Prepayment for Rent £1,500.", "dr": "Prepayments", "cr": "Rent", "amt": 1500},
-    {"q": "Year-End: Record depreciation on fixtures £200.", "dr": "Depreciation", "cr": "Fixtures", "amt": 200},
-    {"q": "Year-End: Write off a bad debt £400.", "dr": "Bad Debts", "cr": "Receivables", "amt": 400},
-    {"q": "Record final cash sales for the year £2,000.", "dr": "Bank", "cr": "Sales", "amt": 2000}
+    # SPRINT 2: CREDIT
+    {"q": "Bought goods £4,000 on credit from SupplyCo.", "dr": "Inventory", "cr": "Payables", "amt": 4000},
+    {"q": "Sold goods £6,000 on credit to RetailPlus.", "dr": "Receivables", "cr": "Sales", "amt": 6000},
+    {"q": "Returned £500 faulty goods to SupplyCo.", "dr": "Payables", "cr": "Inventory", "amt": 500},
+    {"q": "RetailPlus returned £300 goods to us.", "dr": "Sales", "cr": "Receivables", "amt": 300},
+    {"q": "Paid SupplyCo £3,500 by cheque.", "dr": "Payables", "cr": "Bank", "amt": 3500},
+    # SPRINT 3: OPERATIONS
+    {"q": "Received £5,700 from RetailPlus.", "dr": "Bank", "cr": "Receivables", "amt": 5700},
+    {"q": "Paid staff wages £2,500.", "dr": "Wages", "cr": "Bank", "amt": 2500},
+    {"q": "Took Bank Loan £10,000.", "dr": "Bank", "cr": "Loan", "amt": 10000},
+    {"q": "Paid loan interest £100.", "dr": "Interest", "cr": "Bank", "amt": 100},
+    {"q": "Owner withdrew £1,000 cash.", "dr": "Drawings", "cr": "Bank", "amt": 1000},
+    # SPRINT 4: YEAR END
+    {"q": "Accrue unpaid electricity £200.", "dr": "Electricity", "cr": "Accruals", "amt": 200},
+    {"q": "Prepay Rent £1,500.", "dr": "Prepayments", "cr": "Rent", "amt": 1500},
+    {"q": "Depreciate Fixtures £200.", "dr": "Depreciation", "cr": "Fixtures", "amt": 200},
+    {"q": "Write off Bad Debt £400.", "dr": "Bad Debts", "cr": "Receivables", "amt": 400},
+    {"q": "Cash Sales for final week £2,000.", "dr": "Bank", "cr": "Sales", "amt": 2000}
 ]
 
-# 5. Certificate Logic (PDF)
+# 4. Helper Function: Render a Single T-Account
+def render_t_account(name, data):
+    dr_rows = "".join([f'<div class="t-row"><span>{r}</span><span>{v:,.0f}</span></div>' for r, v in data['Dr']])
+    cr_rows = "".join([f'<div class="t-row"><span>{r}</span><span>{v:,.0f}</span></div>' for r, v in data['Cr']])
+    
+    # Calculate Balances
+    dr_sum = sum(x[1] for x in data['Dr'])
+    cr_sum = sum(x[1] for x in data['Cr'])
+    total = max(dr_sum, cr_sum)
+    bal_cf = total - min(dr_sum, cr_sum)
+    
+    # Logic for displaying Balance c/f to balance the sides
+    dr_extra = f'<div class="t-row" style="color:#666; font-style:italic;"><span>Bal c/f</span><span>{bal_cf:,.0f}</span></div>' if cr_sum > dr_sum else ""
+    cr_extra = f'<div class="t-row" style="color:#666; font-style:italic;"><span>Bal c/f</span><span>{bal_cf:,.0f}</span></div>' if dr_sum > cr_sum else ""
+
+    # Logic for Balance b/f (The opening balance for next period)
+    bal_bf = ""
+    if dr_sum > cr_sum:
+        bal_bf = f'<div class="bal-bf">Bal b/f: £{bal_cf:,.0f}</div>'
+    elif cr_sum > dr_sum:
+        bal_bf = f'<div class="bal-bf" style="text-align:right;">Bal b/f: £{bal_cf:,.0f}</div>'
+
+    html = f"""
+    <div class="t-container">
+        <div class="t-header">{name}</div>
+        <div class="t-body">
+            <div class="t-side t-left">
+                {dr_rows}
+                {dr_extra}
+                <div class="t-total"><span>Total</span><span>{total:,.0f}</span></div>
+                {bal_bf if dr_sum > cr_sum else ""}
+            </div>
+            <div class="t-side">
+                {cr_rows}
+                {cr_extra}
+                <div class="t-total"><span>Total</span><span>{total:,.0f}</span></div>
+                {bal_bf if cr_sum > dr_sum else ""}
+            </div>
+        </div>
+    </div>
+    """
+    return html
+
+# 5. PDF Generator
 def create_pdf(name, score, grade, email):
     pdf = FPDF(orientation="L", unit="mm", format="A4")
     pdf.add_page()
@@ -76,63 +154,73 @@ def create_pdf(name, score, grade, email):
     pdf.set_line_width(5)
     pdf.rect(5, 5, 287, 200)
     pdf.set_font("Helvetica", "B", 40)
-    pdf.cell(0, 60, "CERTIFICATE OF COMPETENCY", ln=True, align="C")
+    pdf.cell(0, 60, "CERTIFICATE OF ACHIEVEMENT", ln=True, align="C")
     pdf.set_font("Helvetica", "", 20)
-    pdf.cell(0, 20, "This certifies that", ln=True, align="C")
+    pdf.cell(0, 20, "Awarded to", ln=True, align="C")
     pdf.set_font("Helvetica", "B", 30)
     pdf.cell(0, 25, name.upper(), ln=True, align="C")
     pdf.set_font("Helvetica", "", 16)
-    pdf.cell(0, 15, f"Email: {email}", ln=True, align="C")
-    pdf.cell(0, 15, f"Has passed the Accounting Masterclass with Grade: {grade}", ln=True, align="C")
+    pdf.cell(0, 15, f"Account: {email}", ln=True, align="C")
+    pdf.cell(0, 15, f"Grade: {grade} | Score: {score}", ln=True, align="C")
     return pdf.output()
 
-# --- HEADER SECTION ---
-st.title("🎓 Accounting Masterclass: 20-Round Challenge")
-c1, c2 = st.columns([3, 1])
-with c2:
-    st.markdown(f'<div class="score-card"><h3>Score: {st.session_state.score}</h3></div>', unsafe_allow_html=True)
-with c1:
+# --- APP LAYOUT ---
+st.title("🎓 Accounting Masterclass")
+
+col_score, col_prog = st.columns([1, 4])
+with col_score:
+    st.markdown(f'<div class="score-card">Score: {st.session_state.score}</div>', unsafe_allow_html=True)
+with col_prog:
     prog = st.session_state.level / len(tasks)
     st.progress(prog)
-    st.write(f"Round {st.session_state.level + 1} of {len(tasks)}")
+    st.caption(f"Round {st.session_state.level + 1} of 20")
 
-# --- GAMEPLAY LOGIC ---
+# --- GAME LOGIC ---
 if st.session_state.level < len(tasks):
     task = tasks[st.session_state.level]
     
-    # If round is NOT complete, show the question
+    # STEP 1: SHOW QUESTION
     if not st.session_state.round_complete:
         st.info(f"**Transaction:** {task['q']}")
         
-        i1, i2, i3 = st.columns(3)
-        accounts = ["Select...", "Bank", "Capital", "Premises", "Fixtures", "Insurance", "Inventory", "Payables", "Receivables", "Sales", "Wages", "Loan", "Interest", "Drawings", "Electricity", "Accruals", "Prepayments", "Rent", "Depreciation", "Bad Debts"]
+        c1, c2, c3 = st.columns(3)
+        acc_opts = ["Select...", "Bank", "Capital", "Premises", "Fixtures", "Insurance", "Inventory", "Payables", "Receivables", "Sales", "Wages", "Loan", "Interest", "Drawings", "Electricity", "Accruals", "Prepayments", "Rent", "Depreciation", "Bad Debts"]
         
-        with i1: dr = st.selectbox("Debit (DEAD)", accounts, key=f"dr_{st.session_state.level}")
-        with i2: cr = st.selectbox("Credit (CLIC)", accounts, key=f"cr_{st.session_state.level}")
-        with i3: amt = st.number_input("Amount (£)", value=0, key=f"amt_{st.session_state.level}")
-
-        if st.button("Post Transaction 🚀"):
+        with c1: dr = st.selectbox("Debit (DEAD)", acc_opts, key=f"d{st.session_state.level}")
+        with c2: cr = st.selectbox("Credit (CLIC)", acc_opts, key=f"c{st.session_state.level}")
+        with c3: amt = st.number_input("Amount (£)", step=10, key=f"a{st.session_state.level}")
+        
+        if st.button("Post Transaction"):
             if dr == task['dr'] and cr == task['cr'] and amt == task['amt']:
-                st.success("✅ Correct! The Ledger has been updated.")
                 st.session_state.score += 100
-                
-                # UPDATE LEDGER
-                for side, acc, ref in [('Dr', dr, cr), ('Cr', cr, dr)]:
-                    if acc not in st.session_state.ledger: st.session_state.ledger[acc] = {'Dr': [], 'Cr': []}
-                    st.session_state.ledger[acc][side].append((ref, amt))
-                
-                # Mark round as complete to trigger "Next" button
                 st.session_state.round_complete = True
+                
+                # UPDATE LEDGER (NARRATIVE = OTHER ACCOUNT)
+                if dr not in st.session_state.ledger: st.session_state.ledger[dr] = {'Dr': [], 'Cr': []}
+                if cr not in st.session_state.ledger: st.session_state.ledger[cr] = {'Dr': [], 'Cr': []}
+                
+                # Debit Side gets Credit Name as Ref
+                st.session_state.ledger[dr]['Dr'].append((cr, amt))
+                # Credit Side gets Debit Name as Ref
+                st.session_state.ledger[cr]['Cr'].append((dr, amt))
+                
                 st.rerun()
             else:
                 st.session_state.score -= 20
                 st.session_state.mistakes += 1
-                st.error(f"❌ Incorrect. Hint: You need to Debit '{task['dr']}' and Credit '{task['cr']}'. Try again!")
+                st.error("Incorrect posting. Check your DEADCLIC logic!")
     
-    # If round IS complete, show the "Next" button
+    # STEP 2: SHOW RESULT & "NEXT" BUTTON
     else:
-        st.success("Transaction posted successfully! Review the T-Accounts below, then click Next.")
-        if st.button("➡️ Start Next Round"):
+        st.success("✅ Transaction Posted! Review the updated T-Accounts below.")
+        
+        # Show ONLY the accounts involved in this transaction for clarity
+        st.subheader("Current Transaction Impact:")
+        c_a, c_b = st.columns(2)
+        with c_a: st.markdown(render_t_account(task['dr'], st.session_state.ledger[task['dr']]), unsafe_allow_html=True)
+        with c_b: st.markdown(render_t_account(task['cr'], st.session_state.ledger[task['cr']]), unsafe_allow_html=True)
+
+        if st.button("➡️ Proceed to Next Round"):
             st.session_state.level += 1
             st.session_state.round_complete = False
             st.rerun()
@@ -140,52 +228,25 @@ if st.session_state.level < len(tasks):
 else:
     # --- FINAL SCREEN ---
     st.balloons()
-    accuracy = (len(tasks) / (len(tasks) + st.session_state.mistakes)) * 100
-    grade = 'Distinction' if accuracy > 90 else 'Merit' if accuracy > 75 else 'Pass'
+    acc = (len(tasks) / (len(tasks) + st.session_state.mistakes)) * 100
+    grade = 'Distinction' if acc > 90 else 'Merit' if acc > 75 else 'Pass'
     
-    st.markdown(f"""
-    <div style="background-color:#dcfce7; padding:20px; border-radius:10px; border:2px solid #166534; text-align:center;">
-        <h1 style="color:#14532d; margin:0;">Course Completed!</h1>
-        <h3>Final Grade: {grade} ({accuracy:.0f}%)</h3>
-    </div>
-    """, unsafe_allow_html=True)
+    st.success(f"### Course Complete! Final Grade: {grade}")
     
-    with st.expander("🏆 Download Your Certificate"):
-        name_in = st.text_input("Full Name")
-        email_in = st.text_input("Email Address (for our records)")
-        if name_in and email_in:
-            pdf_data = create_pdf(name_in, st.session_state.score, grade, email_in)
-            st.download_button("📥 Download PDF Certificate", data=pdf_data, file_name="Certificate.pdf", mime="application/pdf")
-
-# --- VISUAL LEDGER (ALWAYS VISIBLE) ---
-st.divider()
-st.subheader("📖 General Ledger (Live View)")
-
-if not st.session_state.ledger:
-    st.info("T-Accounts will appear here automatically after your first correct entry.")
-else:
-    # Grid Logic: Display accounts in rows of 2
-    acc_items = list(st.session_state.ledger.items())
-    for i in range(0, len(acc_items), 2):
-        cols = st.columns(2)
-        for j in range(2):
-            if i + j < len(acc_items):
-                name, data = acc_items[i+j]
-                dr_s, cr_s = sum(x[1] for x in data['Dr']), sum(x[1] for x in data['Cr'])
-                tot, b_cf = max(dr_s, cr_s), max(dr_s, cr_s) - min(dr_s, cr_s)
-                
-                with cols[j]:
-                    # HTML Construction for T-Account
-                    h = f'<div class="t-account-container"><div class="t-title">{name}</div><table class="t-table"><tr><td class="left-col">'
-                    for r, v in data['Dr']: h += f'<div class="row-flex"><span>{r}</span><span>{v}</span></div>'
-                    if cr_s > dr_s: h += f'<div class="row-flex" style="font-style:italic; color:#666;"><span>Bal c/f</span><span>{b_cf}</span></div>'
-                    h += '</td><td class="right-col">'
-                    for r, v in data['Cr']: h += f'<div class="row-flex"><span>{r}</span><span>{v}</span></div>'
-                    if dr_s > cr_s: h += f'<div class="row-flex" style="font-style:italic; color:#666;"><span>Bal c/f</span><span>{b_cf}</span></div>'
-                    h += f'</td></tr><tr><td class="left-col"><div class="total-line row-flex"><span>Total</span><span>{tot}</span></div></td><td><div class="total-line row-flex"><span>Total</span><span>{tot}</span></div></td></tr></table>'
-                    
-                    # Balance Brought Forward Logic
-                    if dr_s > cr_s: h += f'<div class="bal-bf">Bal b/f: £{b_cf}</div>'
-                    elif cr_s > dr_s: h += f'<div class="bal-bf" style="text-align:right;">Bal b/f: £{b_cf}</div>'
-                    
-                    st.markdown(h + "</div>", unsafe_allow_html=True)
+    with st.expander("🎓 Download Certificate"):
+        name = st.text_input("Name")
+        email = st.text_input("Email")
+        if name and email:
+            pdf = create_pdf(name, st.session_state.score, grade, email)
+            st.download_button("Download PDF", pdf, "Certificate.pdf", "application/pdf")
+            
+# --- FULL LEDGER VIEW ---
+if st.session_state.ledger:
+    st.divider()
+    with st.expander("📖 View Full General Ledger", expanded=False):
+        keys = list(st.session_state.ledger.keys())
+        for i in range(0, len(keys), 2):
+            c1, c2 = st.columns(2)
+            with c1: st.markdown(render_t_account(keys[i], st.session_state.ledger[keys[i]]), unsafe_allow_html=True)
+            if i+1 < len(keys):
+                with c2: st.markdown(render_t_account(keys[i+1], st.session_state.ledger[keys[i+1]]), unsafe_allow_html=True)
