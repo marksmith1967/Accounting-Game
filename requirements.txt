@@ -1,9 +1,1 @@
-double-entry-game/
-  README.md
-  main.py
-  accounting/
-    __init__.py
-    ledger.py
-    parser.py
-    questions.py
-    engine.py
+streamlit
