@@ -1,4 +1,3 @@
-import re
 import random
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
@@ -86,7 +85,6 @@ class Ledger:
         dr_total, cr_total = acc.totals()
         bal_side, bal_amt = acc.balance()
 
-        # build entry lines
         rows: List[Tuple[str, str]] = []
         max_len = max(len(acc.debits), len(acc.credits))
         for i in range(max_len):
@@ -102,7 +100,7 @@ class Ledger:
                 r = f"{label:10} {amt:>12,}"
             rows.append((l, r))
 
-        # add balance c/d to force totals equal (traditional style)
+        # add balance c/d so totals agree
         if bal_side and bal_amt:
             if bal_side == "DR":
                 rows.append(("", f"{'Bal c/d':10} {bal_amt:>12,}"))
@@ -111,10 +109,9 @@ class Ledger:
                 rows.append((f"{'Bal c/d':10} {bal_amt:>12,}", ""))
                 dr_total += bal_amt
 
-        # totals
         rows.append((f"{'Total':10} {dr_total:>12,}", f"{'Total':10} {cr_total:>12,}"))
 
-        # balance b/d (teaching hint)
+        # balance b/d line (teaching hint)
         if bal_side and bal_amt:
             if bal_side == "DR":
                 rows.append((f"{'Bal b/d':10} {bal_amt:>12,}", ""))
@@ -182,7 +179,6 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
     diff = round_no
     templates = []
 
-    # rounds 1–4 basics
     if diff <= 4:
         templates = [
             ("Owner introduced funds into the business £{x}.",
@@ -196,8 +192,6 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
             ("Made a sale and received the money in bank £{x}.",
              lambda x: [_p(A["BANK"], "DR", x, "Sale"), _p(A["SALES"], "CR", x, "Sale")]),
         ]
-
-    # rounds 5–8 credit and returns
     elif diff <= 8:
         templates = [
             ("Sold goods on credit £{x}.",
@@ -213,8 +207,6 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
             ("Paid a supplier from bank £{x}.",
              lambda x: [_p(A["AP"], "DR", x, "Pay"), _p(A["BANK"], "CR", x, "Pay")]),
         ]
-
-    # rounds 9–12 VAT and depreciation
     elif diff <= 12:
         templates = [
             ("Bought utilities, net £{x} plus VAT 20%, paid by bank.",
@@ -242,8 +234,6 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
             ("Received a supplier discount £{x}.",
              lambda x: [_p(A["AP"], "DR", x, "Disc"), _p(A["DISC_REC"], "CR", x, "Disc")]),
         ]
-
-    # rounds 13–16 adjustments
     elif diff <= 16:
         templates = [
             ("At period end, rent of £{x} is owing (accrual).",
@@ -257,8 +247,6 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
             ("Owner took drawings £{x} from bank.",
              lambda x: [_p(A["DRAW"], "DR", x, "Draw"), _p(A["BANK"], "CR", x, "Draw")]),
         ]
-
-    # rounds 17–20 suspense and corrections
     else:
         templates = [
             ("Correct this error: equipment £{x} was wrongly debited to purchases.",
@@ -338,13 +326,11 @@ def amount_options(expected: List[Posting], rng: random.Random) -> List[int]:
     correct = sorted(set(p.amount for p in expected))
     distractors: List[int] = []
     for a in correct:
-        # small realistic distractors
         for delta in (50, 100, 200):
             if a - delta > 0:
                 distractors.append(a - delta)
             distractors.append(a + delta)
 
-    # add a couple of random distractors within range
     if correct:
         lo = max(50, min(correct) - 500)
         hi = max(correct) + 500
@@ -352,7 +338,7 @@ def amount_options(expected: List[Posting], rng: random.Random) -> List[int]:
             distractors.append(rng.randrange(lo, hi + 50, 50))
 
     merged = sorted(set(correct + distractors))
-    return merged[:18]  # keep dropdown manageable
+    return merged[:18]
 
 
 # ----------------------------
@@ -402,14 +388,12 @@ def generate_hint(student: List[Posting], expected: List[Posting]) -> Optional[s
     e_acc = sorted([p.account for p in expected])
 
     if sorted(set(s_acc)) == sorted(set(e_acc)):
-        # accounts match but something else wrong
         s_pairs = sorted((p.account, p.side) for p in student)
         e_pairs = sorted((p.account, p.side) for p in expected)
         if sorted(set(a for a, _ in s_pairs)) == sorted(set(a for a, _ in e_pairs)) and s_pairs != e_pairs:
             return "Hint: You have the right accounts, but one or more are on the wrong side (Dr or Cr)."
         return "Hint: The right accounts are there, but check the amounts and whether VAT or discounts are treated correctly."
 
-    # VAT hint
     e_has_vat = any("VAT" in p.account for p in expected)
     s_has_vat = any("VAT" in p.account for p in student)
     if e_has_vat and not s_has_vat:
@@ -424,7 +408,23 @@ def generate_hint(student: List[Posting], expected: List[Posting]) -> Optional[s
 
 st.set_page_config(page_title="Double Entry Game", layout="wide")
 st.title("Double Entry Game")
-st.caption("Dropdown-based journal entry. Live balancing. Shows the journal and the T accounts after each question.")
+st.caption("Dropdown-based journal entry. Live balancing. Shows the journal and T accounts after each question.")
+
+# Ensure session defaults exist (prevents AttributeError)
+defaults = {
+    "started": False,
+    "last_message": "",
+    "last_feedback": "",
+    "last_journal": "",
+    "attempts": 0,
+    "score": 0,
+    "q_index": 0,
+    "lines": 2,
+    "last_correct": None,
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 with st.sidebar:
     st.header("Round")
@@ -441,14 +441,16 @@ with st.sidebar:
         st.session_state.last_message = ""
         st.session_state.last_feedback = ""
         st.session_state.last_journal = ""
-        st.session_state.lines = 2  # reset per round
+        st.session_state.lines = 2
         st.session_state.last_correct = None
+        st.session_state.current_q_index = -1
 
     if st.button("Reset everything"):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
+        st.rerun()
 
-if "started" not in st.session_state or not st.session_state.started:
+if not st.session_state.started:
     st.info("Choose a round in the sidebar, then click Start new round.")
     st.stop()
 
@@ -470,11 +472,14 @@ with left:
 
     q = questions[q_index]
 
-    # reset line count sensibly for each new question
     expected_lines = max(2, min(5, len(q.expected)))
-    if "current_q_index" not in st.session_state or st.session_state.current_q_index != q_index:
+    if st.session_state.get("current_q_index", -1) != q_index:
         st.session_state.current_q_index = q_index
         st.session_state.lines = expected_lines
+        st.session_state.last_message = ""
+        st.session_state.last_feedback = ""
+        st.session_state.last_journal = ""
+        st.session_state.last_correct = None
 
     st.markdown(f"**{q.prompt}**")
 
@@ -510,7 +515,6 @@ with left:
         if account and amount > 0:
             rows.append((side, account, amount))
 
-    # live totals
     dr_total = sum(a for s, _, a in rows if s == "DR")
     cr_total = sum(a for s, _, a in rows if s == "CR")
     diff = dr_total - cr_total
@@ -521,7 +525,10 @@ with left:
     if diff == 0 and rows:
         st.success("Balanced")
     else:
-        st.warning(f"Not balanced. Difference £{abs(diff):,} ({'Dr too high' if diff > 0 else 'Cr too high' if diff < 0 else 'no lines yet'})")
+        st.warning(
+            f"Not balanced. Difference £{abs(diff):,} "
+            f"({'Dr too high' if diff > 0 else 'Cr too high' if diff < 0 else 'no lines yet'})"
+        )
 
     add_col, remove_col = st.columns([1, 1])
     with add_col:
@@ -542,7 +549,6 @@ with left:
         show_answer = st.button("Show model answer and post it")
 
     if submitted:
-        # block if not balanced or no valid rows
         if not rows:
             st.session_state.last_correct = False
             st.session_state.last_message = "Not marked. Please select at least two lines with accounts and amounts."
@@ -571,12 +577,12 @@ with left:
                 st.session_state.last_correct = False
                 st.session_state.last_message = "Not quite"
                 st.session_state.last_feedback = feedback
+
                 hint = generate_hint(student_postings, q.expected)
                 if hint:
                     st.session_state.last_feedback = st.session_state.last_feedback + "\n\n" + hint
 
                 if st.session_state.attempts >= 2:
-                    # post model answer after 2 attempts
                     ledger.post_many(tag_with_question(q.expected, q_index + 1))
                     st.session_state.last_message = "Two attempts used. Model answer posted."
                     st.session_state.last_journal = format_journal(q.expected)
@@ -596,7 +602,7 @@ with left:
         st.session_state.attempts = 0
         st.rerun()
 
-    if st.session_state.last_message:
+    if st.session_state.get("last_message", ""):
         if st.session_state.last_correct is True:
             st.success(st.session_state.last_message)
         elif st.session_state.last_correct is False:
@@ -604,12 +610,12 @@ with left:
         else:
             st.info(st.session_state.last_message)
 
-    if st.session_state.last_feedback:
-        st.code(st.session_state.last_feedback, language="text")
+    if st.session_state.get("last_feedback", ""):
+        st.code(st.session_state.get("last_feedback", ""), language="text")
 
-    if st.session_state.last_journal:
+    if st.session_state.get("last_journal", ""):
         st.markdown("Double entry posted")
-        st.code(st.session_state.last_journal, language="text")
+        st.code(st.session_state.get("last_journal", ""), language="text")
 
 with right:
     st.subheader("T accounts")
