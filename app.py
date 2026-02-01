@@ -1,35 +1,51 @@
 import streamlit as st
 import pandas as pd
 
-# Page Config
 st.set_page_config(page_title="Accounting Pro", layout="wide")
 
-# IMPROVED CSS for Visibility
+# CSS to mimic the formal T-account structure in your image
 st.markdown("""
     <style>
-    .t-account { border: 2px solid #4A90E2; margin-bottom: 20px; border-radius: 5px; background-color: #1E1E1E; }
-    .t-header { 
-        text-align: center; 
-        border-bottom: 2px solid #4A90E2; 
-        font-weight: bold; 
-        padding: 10px;
-        color: #FFFFFF !important;  /* Pure white text */
-        background-color: #4A90E2; /* Blue background for headers */
-        font-size: 1.2rem;
+    .t-account-container {
+        font-family: 'Courier New', Courier, monospace;
+        background-color: white;
+        color: black;
+        padding: 15px;
+        border: 1px solid #000;
+        margin-bottom: 20px;
+        min-width: 400px;
     }
-    .t-grid { display: grid; grid-template-columns: 1fr 1fr; }
-    .t-cell { padding: 10px; border-right: 1px solid #4A90E2; min-height: 80px; text-align: left; color: #00FF00; }
-    .t-cell-right { padding: 10px; min-height: 80px; text-align: right; color: #FF4B4B; }
-    .dr-label { font-size: 0.8rem; opacity: 0.7; color: white; }
-    .cr-label { font-size: 0.8rem; opacity: 0.7; color: white; }
+    .t-title {
+        text-align: center;
+        font-weight: bold;
+        font-size: 1.2rem;
+        border-bottom: 2px solid black;
+        margin-bottom: 0;
+    }
+    .t-labels {
+        display: flex;
+        justify-content: space-between;
+        font-weight: bold;
+        padding: 0 5px;
+    }
+    .t-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .t-table td {
+        width: 50%;
+        vertical-align: top;
+        padding: 2px 5px;
+    }
+    .left-col { border-right: 2px solid black; }
+    .row-flex { display: flex; justify-content: space-between; width: 100%; }
+    .total-line { border-top: 1px solid black; border-bottom: 4px double black; font-weight: bold; margin-top: 5px; }
+    .bal-bf { font-weight: bold; margin-top: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# Initialize Session State
-if 'level' not in st.session_state:
-    st.session_state.level = 0
-if 'ledger_data' not in st.session_state:
-    st.session_state.ledger_data = {}
+if 'level' not in st.session_state: st.session_state.level = 0
+if 'ledger_data' not in st.session_state: st.session_state.ledger_data = {}
 
 tasks = [
     {"q": "Owner starts business with £20,000 cash.", "dr": "Bank", "cr": "Capital", "amt": 20000},
@@ -41,84 +57,69 @@ tasks = [
 ]
 
 st.title("💷 The Interactive Accounting Lab")
-st.sidebar.header("DEADCLIC Reminder")
-st.sidebar.markdown("""
-- **D**ebit: **E**xpenses, **A**ssets, **D**rawings
-- **C**redit: **L**iabilities, **I**ncome, **C**apital
-""")
 
+# --- Form Section ---
 if st.session_state.level < len(tasks):
     task = tasks[st.session_state.level]
-    st.subheader(f"Level {st.session_state.level + 1}: The Transaction")
-    st.info(f"**Scenario:** {task['q']}")
-
-    # Form using columns
-    col1, col2, col3 = st.columns(3)
+    st.info(f"**Level {st.session_state.level + 1}:** {task['q']}")
     
-    # The 'key' uses the level number to ensure it resets when the level changes
-    with col1:
-        dr_choice = st.selectbox("Debit Account", ["Select...", "Bank", "Capital", "Van", "Rent Expense", "Stationery", "Payables", "Sales Income", "Drawings"], key=f"dr_{st.session_state.level}")
-    with col2:
-        cr_choice = st.selectbox("Credit Account", ["Select...", "Bank", "Capital", "Van", "Rent Expense", "Stationery", "Payables", "Sales Income", "Drawings"], key=f"cr_{st.session_state.level}")
-    with col3:
-        amount_input = st.number_input("Amount (£)", value=0, key=f"amt_{st.session_state.level}")
+    col1, col2, col3 = st.columns(3)
+    # Selection resets to "Select..." every level because 'key' changes with level
+    with col1: dr = st.selectbox("Debit", ["Select...", "Bank", "Capital", "Van", "Rent Expense", "Stationery", "Payables", "Sales Income", "Drawings"], key=f"dr_{st.session_state.level}")
+    with col2: cr = st.selectbox("Credit", ["Select...", "Bank", "Capital", "Van", "Rent Expense", "Stationery", "Payables", "Sales Income", "Drawings"], key=f"cr_{st.session_state.level}")
+    with col3: amt = st.number_input("Amount (£)", value=0, key=f"amt_{st.session_state.level}")
 
     if st.button("Post Transaction 🚀"):
-        if dr_choice == task['dr'] and cr_choice == task['cr'] and amount_input == task['amt']:
-            st.success("Correct! Well done.")
-            for side, acc in [('Dr', dr_choice), ('Cr', cr_choice)]:
-                if acc not in st.session_state.ledger_data:
-                    st.session_state.ledger_data[acc] = {'Dr': [], 'Cr': []}
-                st.session_state.ledger_data[acc][side].append(amount_input)
+        if dr == task['dr'] and cr == task['cr'] and amt == task['amt']:
+            st.success("Correct!")
+            for side, acc in [('Dr', dr), ('Cr', cr)]:
+                if acc not in st.session_state.ledger_data: st.session_state.ledger_data[acc] = {'Dr': [], 'Cr': []}
+                st.session_state.ledger_data[acc][side].append((task['q'][:15], amt))
             st.session_state.level += 1
             st.rerun()
         else:
-            st.error("Incorrect. Check your DEADCLIC logic!")
-            if dr_choice != "Select..." and dr_choice != task['dr']:
-                st.write(f"💡 Hint: Is {dr_choice} really a 'DEAD' item (Expense, Asset, or Drawing) that is increasing?")
+            st.error("Incorrect. Use DEADCLIC logic!")
 
-else:
-    st.balloons()
-    st.success("Mastery Achieved! All accounts balanced.")
-    if st.button("Restart Session"):
-        st.session_state.level = 0
-        st.session_state.ledger_data = {}
-        st.rerun()
-
-# --- T-Accounts ---
-st.divider()
-st.subheader("📖 Visual General Ledger (T-Accounts)")
-
+# --- Visual T-Accounts (The Requested Style) ---
+st.subheader("📖 Visual General Ledger")
 if st.session_state.ledger_data:
-    cols = st.columns(3)
+    cols = st.columns(2)
     for i, (acc_name, entries) in enumerate(st.session_state.ledger_data.items()):
-        with cols[i % 3]:
-            dr_content = '<br>'.join([f"£{x}" for x in entries['Dr']]) if entries['Dr'] else ""
-            cr_content = '<br>'.join([f"£{x}" for x in entries['Cr']]) if entries['Cr'] else ""
-            st.markdown(f"""
-                <div class="t-account">
-                    <div class="t-header">{acc_name}</div>
-                    <div class="t-grid">
-                        <div class="t-cell"><span class="dr-label">Dr</span><br>{dr_content}</div>
-                        <div class="t-cell-right"><span class="cr-label">Cr</span><br>{cr_content}</div>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-
-# --- Trial Balance ---
-st.divider()
-st.subheader("⚖️ Trial Balance Summary")
-if st.session_state.ledger_data:
-    tb_data = []
-    t_dr, t_cr = 0, 0
-    for acc, entries in st.session_state.ledger_data.items():
-        bal = sum(entries['Dr']) - sum(entries['Cr'])
-        if bal > 0:
-            tb_data.append({"Account": acc, "Debit": f"£{bal}", "Credit": ""})
-            t_dr += bal
-        elif bal < 0:
-            tb_data.append({"Account": acc, "Debit": "", "Credit": f"£{abs(bal)}"})
-            t_cr += abs(bal)
-    
-    st.table(pd.DataFrame(tb_data))
-    st.write(f"**Total Debits:** £{t_dr} | **Total Credits:** £{t_cr}")
+        dr_sum = sum(x[1] for x in entries['Dr'])
+        cr_sum = sum(x[1] for x in entries['Cr'])
+        total = max(dr_sum, cr_sum)
+        bal_cf = total - min(dr_sum, cr_sum)
+        
+        with cols[i % 2]:
+            html = f"""<div class="t-account-container">
+                <div class="t-labels"><span>Dr</span><span>Cr</span></div>
+                <div class="t-title">{acc_name}</div>
+                <table class="t-table"><tr><td class="left-col">"""
+            
+            # Left Side (Dr)
+            for desc, val in entries['Dr']:
+                html += f'<div class="row-flex"><span>{desc}</span><span>{val}</span></div>'
+            if cr_sum > dr_sum:
+                html += f'<div class="row-flex"><span>Balance c/f</span><span>{bal_cf}</span></div>'
+            
+            html += '</td><td>' # Switch to Credit Side
+            
+            # Right Side (Cr)
+            for desc, val in entries['Cr']:
+                html += f'<div class="row-flex"><span>{desc}</span><span>{val}</span></div>'
+            if dr_sum > cr_sum:
+                html += f'<div class="row-flex"><span>Balance c/f</span><span>{bal_cf}</span></div>'
+            
+            # Totals and Balance b/f
+            html += f"""</td></tr>
+                <tr><td class="left-col"><div class="total-line row-flex"><span>Total</span><span>{total}</span></div></td>
+                <td><div class="total-line row-flex"><span>Total</span><span>{total}</span></div></td></tr>
+            </table>"""
+            
+            if dr_sum > cr_sum:
+                html += f'<div class="bal-bf">Balance b/f: £{bal_cf}</div>'
+            elif cr_sum > dr_sum:
+                html += f'<div style="text-align: right;" class="bal-bf">Balance b/f: £{bal_cf}</div>'
+            
+            html += "</div>"
+            st.markdown(html, unsafe_allow_html=True)
