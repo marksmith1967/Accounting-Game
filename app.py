@@ -7,7 +7,7 @@ import streamlit as st
 
 
 # ----------------------------
-# Data models
+# Models
 # ----------------------------
 
 @dataclass(frozen=True)
@@ -25,18 +25,16 @@ class LedgerAccount:
     credits: List[Tuple[str, int]] = field(default_factory=list)
 
     def post(self, side: str, amount: int, narrative: str = "") -> None:
-        side = side.upper().strip()
-        if side == "DR":
+        s = side.upper().strip()
+        if s == "DR":
             self.debits.append((narrative, amount))
-        elif side == "CR":
+        elif s == "CR":
             self.credits.append((narrative, amount))
         else:
             raise ValueError("Side must be DR or CR")
 
     def totals(self) -> Tuple[int, int]:
-        dr = sum(a for _, a in self.debits)
-        cr = sum(a for _, a in self.credits)
-        return dr, cr
+        return sum(a for _, a in self.debits), sum(a for _, a in self.credits)
 
     def balance(self) -> Tuple[str, int]:
         dr, cr = self.totals()
@@ -68,143 +66,64 @@ class Ledger:
                 names.append(n)
         return sorted(names)
 
-    def render_all_t_accounts(self, max_accounts: int = 16) -> str:
+    def render_all_t_accounts(self, max_accounts: int = 18) -> str:
         names = self.used_account_names()
         if not names:
             return "(No postings yet)"
-
         names = names[:max_accounts]
-        blocks = [self.render_single_t_account(self.accounts[n]) for n in names]
-        return "\n\n".join(blocks)
+        return "\n\n".join(self._render_single_t(self.accounts[n]) for n in names)
 
     @staticmethod
-    def render_single_t_account(acc: LedgerAccount) -> str:
-        """
-        Teaching-friendly T account view.
+    def _render_single_t(acc: LedgerAccount) -> str:
+        width = 70
+        left_w = 34
+        right_w = 35
 
-        Shows
-        - entries on each side with short narrative labels
-        - totals
-        - balance c/d line if needed
-        - balance b/d shown as next line (simplified)
-        """
-        width = 68
-        left_w = 33
-        right_w = 33
-
-        title = f" {acc.name} "
-        top = title.center(width, "=")
-
+        top = f" {acc.name} ".center(width, "=")
         header = f"{'DR'.ljust(left_w)}|{'CR'.ljust(right_w)}"
         sep = "-" * left_w + "+" + "-" * right_w
 
         dr_total, cr_total = acc.totals()
         bal_side, bal_amt = acc.balance()
 
-        # Prepare rows for entries
+        # build entry lines
         rows: List[Tuple[str, str]] = []
         max_len = max(len(acc.debits), len(acc.credits))
         for i in range(max_len):
-            left = ""
-            right = ""
+            l = ""
+            r = ""
             if i < len(acc.debits):
                 nar, amt = acc.debits[i]
                 label = (nar or "").strip()[:10]
-                left = f"{label:10} {amt:>10,}"
+                l = f"{label:10} {amt:>12,}"
             if i < len(acc.credits):
                 nar, amt = acc.credits[i]
                 label = (nar or "").strip()[:10]
-                right = f"{label:10} {amt:>10,}"
-            rows.append((left, right))
+                r = f"{label:10} {amt:>12,}"
+            rows.append((l, r))
 
-        # Add balance c/d line to make totals match, like traditional accounts
+        # add balance c/d to force totals equal (traditional style)
         if bal_side and bal_amt:
             if bal_side == "DR":
-                # Credit needs balance c/d
-                rows.append(("", f"{'Bal c/d':10} {bal_amt:>10,}"))
+                rows.append(("", f"{'Bal c/d':10} {bal_amt:>12,}"))
                 cr_total += bal_amt
             else:
-                rows.append((f"{'Bal c/d':10} {bal_amt:>10,}", ""))
+                rows.append((f"{'Bal c/d':10} {bal_amt:>12,}", ""))
                 dr_total += bal_amt
 
-        # Totals line
-        rows.append((f"{'Total':10} {dr_total:>10,}", f"{'Total':10} {cr_total:>10,}"))
+        # totals
+        rows.append((f"{'Total':10} {dr_total:>12,}", f"{'Total':10} {cr_total:>12,}"))
 
-        # Balance b/d line for next period (teaching hint)
+        # balance b/d (teaching hint)
         if bal_side and bal_amt:
             if bal_side == "DR":
-                rows.append((f"{'Bal b/d':10} {bal_amt:>10,}", ""))
+                rows.append((f"{'Bal b/d':10} {bal_amt:>12,}", ""))
             else:
-                rows.append(("", f"{'Bal b/d':10} {bal_amt:>10,}"))
+                rows.append(("", f"{'Bal b/d':10} {bal_amt:>12,}"))
 
-        rendered_rows = [
-            f"{l.ljust(left_w)}|{r.ljust(right_w)}" for l, r in rows
-        ]
-
+        rendered = [f"{l.ljust(left_w)}|{r.ljust(right_w)}" for l, r in rows]
         bottom = "=" * width
-        return "\n".join([top, header, sep, *rendered_rows, bottom])
-
-
-# ----------------------------
-# Parsing student input
-# ----------------------------
-
-AMOUNT_RE = re.compile(r"^£?[\d,]+$")
-
-
-def parse_amount(token: str) -> int:
-    t = token.strip().replace("£", "").replace(",", "")
-    if not t.isdigit():
-        raise ValueError("Amount must be a whole number, for example 1200 or 1,200")
-    return int(t)
-
-
-def parse_entry(text: str) -> List[Posting]:
-    """
-    Accepts input like:
-      Dr Bank 15000; Cr Capital 15000
-      Dr Motor Expenses 1000; Dr VAT Input 200; Cr Bank 1200
-    """
-    if not text or not text.strip():
-        raise ValueError("Entry is empty")
-
-    parts = [p.strip() for p in text.split(";") if p.strip()]
-    postings: List[Posting] = []
-
-    for part in parts:
-        tokens = part.split()
-        if len(tokens) < 3:
-            raise ValueError(f"Could not read '{part}'. Use: Dr Account Amount")
-
-        side = tokens[0].upper().strip()
-        if side not in {"DR", "CR"}:
-            raise ValueError(f"Each line must start with Dr or Cr. Problem: '{part}'")
-
-        amount_token = tokens[-1]
-        if not AMOUNT_RE.match(amount_token):
-            raise ValueError(f"Last item must be an amount. Problem: '{part}'")
-
-        amount = parse_amount(amount_token)
-        account = " ".join(tokens[1:-1]).strip()
-        if not account:
-            raise ValueError(f"Missing account name in '{part}'")
-
-        postings.append(Posting(account=account, side=side, amount=amount, narrative=""))
-
-    dr_total = sum(p.amount for p in postings if p.side == "DR")
-    cr_total = sum(p.amount for p in postings if p.side == "CR")
-    if dr_total != cr_total:
-        raise ValueError(f"Debits {dr_total:,} do not equal Credits {cr_total:,}")
-
-    return postings
-
-
-def format_postings_lines(postings: List[Posting]) -> str:
-    return "\n".join([f"{p.side.title()} {p.account} {p.amount:,}" for p in postings])
-
-
-def canonical(postings: List[Posting]) -> List[Tuple[str, str, int]]:
-    return sorted([(p.account.strip(), p.side.upper().strip(), p.amount) for p in postings])
+        return "\n".join([top, header, sep, *rendered, bottom])
 
 
 # ----------------------------
@@ -223,6 +142,7 @@ def _p(account: str, side: str, amount: int, nar: str) -> Posting:
 
 def build_round(round_no: int, n: int = 10) -> List[Question]:
     rng = random.Random(1000 + round_no)
+    vat_rate = 20
 
     A = {
         "BANK": "Bank",
@@ -251,10 +171,8 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
         "SUSP": "Suspense",
     }
 
-    def amt(lo: int, hi: int, step: int = 50) -> int:
+    def amt(lo: int, hi: int, step: int = 100) -> int:
         return rng.randrange(lo, hi + step, step)
-
-    vat_rate = 20
 
     def add_vat(net: int) -> Tuple[int, int, int]:
         vat = (net * vat_rate) // 100
@@ -264,50 +182,39 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
     diff = round_no
     templates = []
 
-    # Rounds 1–4 basics
+    # rounds 1–4 basics
     if diff <= 4:
         templates = [
             ("Owner introduced funds into the business £{x}.",
-             lambda x: [_p(A["BANK"], "DR", x, "Owner"),
-                        _p(A["CAP"], "CR", x, "Owner")]),
+             lambda x: [_p(A["BANK"], "DR", x, "Owner"), _p(A["CAP"], "CR", x, "Owner")]),
             ("Paid rent from bank £{x}.",
-             lambda x: [_p(A["RENT"], "DR", x, "Rent"),
-                        _p(A["BANK"], "CR", x, "Rent")]),
+             lambda x: [_p(A["RENT"], "DR", x, "Rent"), _p(A["BANK"], "CR", x, "Rent")]),
             ("Paid wages from bank £{x}.",
-             lambda x: [_p(A["WAGES"], "DR", x, "Wages"),
-                        _p(A["BANK"], "CR", x, "Wages")]),
+             lambda x: [_p(A["WAGES"], "DR", x, "Wages"), _p(A["BANK"], "CR", x, "Wages")]),
             ("Bought equipment and paid immediately by bank £{x}.",
-             lambda x: [_p(A["EQUIP"], "DR", x, "Equip"),
-                        _p(A["BANK"], "CR", x, "Equip")]),
+             lambda x: [_p(A["EQUIP"], "DR", x, "Equip"), _p(A["BANK"], "CR", x, "Equip")]),
             ("Made a sale and received the money in bank £{x}.",
-             lambda x: [_p(A["BANK"], "DR", x, "Sale"),
-                        _p(A["SALES"], "CR", x, "Sale")]),
+             lambda x: [_p(A["BANK"], "DR", x, "Sale"), _p(A["SALES"], "CR", x, "Sale")]),
         ]
 
-    # Rounds 5–8 credit and returns
+    # rounds 5–8 credit and returns
     elif diff <= 8:
         templates = [
             ("Sold goods on credit £{x}.",
-             lambda x: [_p(A["AR"], "DR", x, "Cr sale"),
-                        _p(A["SALES"], "CR", x, "Cr sale")]),
+             lambda x: [_p(A["AR"], "DR", x, "Cr sale"), _p(A["SALES"], "CR", x, "Cr sale")]),
             ("Bought goods on credit £{x}.",
-             lambda x: [_p(A["PUR"], "DR", x, "Cr pur"),
-                        _p(A["AP"], "CR", x, "Cr pur")]),
+             lambda x: [_p(A["PUR"], "DR", x, "Cr pur"), _p(A["AP"], "CR", x, "Cr pur")]),
             ("Customer returned goods worth £{x}.",
-             lambda x: [_p(A["RET_IN"], "DR", x, "Return"),
-                        _p(A["AR"], "CR", x, "Return")]),
+             lambda x: [_p(A["RET_IN"], "DR", x, "Return"), _p(A["AR"], "CR", x, "Return")]),
             ("Returned goods to supplier worth £{x}.",
-             lambda x: [_p(A["AP"], "DR", x, "Return"),
-                        _p(A["RET_OUT"], "CR", x, "Return")]),
+             lambda x: [_p(A["AP"], "DR", x, "Return"), _p(A["RET_OUT"], "CR", x, "Return")]),
             ("Received money from a customer into bank £{x}.",
-             lambda x: [_p(A["BANK"], "DR", x, "Receipt"),
-                        _p(A["AR"], "CR", x, "Receipt")]),
+             lambda x: [_p(A["BANK"], "DR", x, "Receipt"), _p(A["AR"], "CR", x, "Receipt")]),
             ("Paid a supplier from bank £{x}.",
-             lambda x: [_p(A["AP"], "DR", x, "Pay"),
-                        _p(A["BANK"], "CR", x, "Pay")]),
+             lambda x: [_p(A["AP"], "DR", x, "Pay"), _p(A["BANK"], "CR", x, "Pay")]),
         ]
 
-    # Rounds 9–12 VAT and depreciation
+    # rounds 9–12 VAT and depreciation
     elif diff <= 12:
         templates = [
             ("Bought utilities, net £{x} plus VAT 20%, paid by bank.",
@@ -329,70 +236,37 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
                  _p(A["AP"], "CR", gross, "Gross")
              ])(*add_vat(x))),
             ("Record depreciation for the period £{x}.",
-             lambda x: [
-                 _p(A["DEP"], "DR", x, "Dep"),
-                 _p(A["ACCDEP"], "CR", x, "Dep")
-             ]),
+             lambda x: [_p(A["DEP"], "DR", x, "Dep"), _p(A["ACCDEP"], "CR", x, "Dep")]),
             ("Allowed a customer discount £{x}.",
-             lambda x: [
-                 _p(A["DISC_ALL"], "DR", x, "Disc"),
-                 _p(A["AR"], "CR", x, "Disc")
-             ]),
+             lambda x: [_p(A["DISC_ALL"], "DR", x, "Disc"), _p(A["AR"], "CR", x, "Disc")]),
             ("Received a supplier discount £{x}.",
-             lambda x: [
-                 _p(A["AP"], "DR", x, "Disc"),
-                 _p(A["DISC_REC"], "CR", x, "Disc")
-             ]),
+             lambda x: [_p(A["AP"], "DR", x, "Disc"), _p(A["DISC_REC"], "CR", x, "Disc")]),
         ]
 
-    # Rounds 13–16 adjustments
+    # rounds 13–16 adjustments
     elif diff <= 16:
         templates = [
             ("At period end, rent of £{x} is owing (accrual).",
-             lambda x: [
-                 _p(A["RENT"], "DR", x, "Accr"),
-                 _p(A["ACCR"], "CR", x, "Accr")
-             ]),
+             lambda x: [_p(A["RENT"], "DR", x, "Accr"), _p(A["ACCR"], "CR", x, "Accr")]),
             ("At period end, utilities of £{x} were paid in advance (prepayment).",
-             lambda x: [
-                 _p(A["PREP"], "DR", x, "Prep"),
-                 _p(A["UTIL"], "CR", x, "Prep")
-             ]),
+             lambda x: [_p(A["PREP"], "DR", x, "Prep"), _p(A["UTIL"], "CR", x, "Prep")]),
             ("Write off an irrecoverable debt £{x}.",
-             lambda x: [
-                 _p(A["BAD"], "DR", x, "Bad"),
-                 _p(A["AR"], "CR", x, "Bad")
-             ]),
+             lambda x: [_p(A["BAD"], "DR", x, "Bad"), _p(A["AR"], "CR", x, "Bad")]),
             ("Create an allowance for doubtful debts £{x}.",
-             lambda x: [
-                 _p(A["BAD"], "DR", x, "Allow"),
-                 _p(A["ALLOW"], "CR", x, "Allow")
-             ]),
+             lambda x: [_p(A["BAD"], "DR", x, "Allow"), _p(A["ALLOW"], "CR", x, "Allow")]),
             ("Owner took drawings £{x} from bank.",
-             lambda x: [
-                 _p(A["DRAW"], "DR", x, "Draw"),
-                 _p(A["BANK"], "CR", x, "Draw")
-             ]),
+             lambda x: [_p(A["DRAW"], "DR", x, "Draw"), _p(A["BANK"], "CR", x, "Draw")]),
         ]
 
-    # Rounds 17–20 suspense and corrections
+    # rounds 17–20 suspense and corrections
     else:
         templates = [
             ("Correct this error: equipment £{x} was wrongly debited to purchases.",
-             lambda x: [
-                 _p(A["EQUIP"], "DR", x, "Corr"),
-                 _p(A["PUR"], "CR", x, "Corr")
-             ]),
+             lambda x: [_p(A["EQUIP"], "DR", x, "Corr"), _p(A["PUR"], "CR", x, "Corr")]),
             ("A one sided error: bank was credited £{x} but the debit entry was missing. Use suspense.",
-             lambda x: [
-                 _p(A["SUSP"], "DR", x, "Miss"),
-                 _p(A["BANK"], "CR", x, "Miss")
-             ]),
+             lambda x: [_p(A["SUSP"], "DR", x, "Miss"), _p(A["BANK"], "CR", x, "Miss")]),
             ("Clear suspense: the missing debit was rent expense £{x}.",
-             lambda x: [
-                 _p(A["RENT"], "DR", x, "Clear"),
-                 _p(A["SUSP"], "CR", x, "Clear")
-             ]),
+             lambda x: [_p(A["RENT"], "DR", x, "Clear"), _p(A["SUSP"], "CR", x, "Clear")]),
             ("Customer pays £{x} and we allow a discount of £{d}.",
              lambda x: (lambda disc: [
                  _p(A["BANK"], "DR", x, "Settle"),
@@ -431,8 +305,72 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
 
 
 # ----------------------------
-# Marking
+# Dropdown options
 # ----------------------------
+
+def account_options_for_round(round_no: int) -> List[str]:
+    base = [
+        "Bank", "Capital", "Drawings", "Sales", "Purchases",
+        "Rent expense", "Wages expense", "Utilities expense", "Equipment",
+        "Trade receivables", "Trade payables",
+        "Sales returns", "Purchase returns",
+    ]
+    vat = ["VAT input", "VAT output"]
+    discounts = ["Discount allowed", "Discount received"]
+    adjustments = [
+        "Accruals", "Prepayments", "Depreciation expense", "Accumulated depreciation",
+        "Bad debt expense", "Allowance for doubtful debts"
+    ]
+    suspense = ["Suspense"]
+
+    if round_no <= 4:
+        return base
+    if round_no <= 8:
+        return base
+    if round_no <= 12:
+        return base + vat + discounts + ["Depreciation expense", "Accumulated depreciation"]
+    if round_no <= 16:
+        return base + vat + discounts + adjustments
+    return base + vat + discounts + adjustments + suspense
+
+
+def amount_options(expected: List[Posting], rng: random.Random) -> List[int]:
+    correct = sorted(set(p.amount for p in expected))
+    distractors: List[int] = []
+    for a in correct:
+        # small realistic distractors
+        for delta in (50, 100, 200):
+            if a - delta > 0:
+                distractors.append(a - delta)
+            distractors.append(a + delta)
+
+    # add a couple of random distractors within range
+    if correct:
+        lo = max(50, min(correct) - 500)
+        hi = max(correct) + 500
+        for _ in range(3):
+            distractors.append(rng.randrange(lo, hi + 50, 50))
+
+    merged = sorted(set(correct + distractors))
+    return merged[:18]  # keep dropdown manageable
+
+
+# ----------------------------
+# Marking + hints
+# ----------------------------
+
+def canonical(postings: List[Posting]) -> List[Tuple[str, str, int]]:
+    return sorted((p.account.strip(), p.side.upper().strip(), p.amount) for p in postings)
+
+
+def format_journal(postings: List[Posting]) -> str:
+    return "\n".join(f"{p.side.title()} {p.account} {p.amount:,}" for p in postings)
+
+
+def tag_with_question(postings: List[Posting], q_no: int) -> List[Posting]:
+    tag = f"Q{q_no}"
+    return [Posting(account=p.account, side=p.side, amount=p.amount, narrative=tag) for p in postings]
+
 
 def mark(student: List[Posting], expected: List[Posting]) -> Tuple[bool, str]:
     s = canonical(student)
@@ -442,6 +380,7 @@ def mark(student: List[Posting], expected: List[Posting]) -> Tuple[bool, str]:
 
     s_set = set(s)
     e_set = set(e)
+
     missing = sorted(list(e_set - s_set))
     extra = sorted(list(s_set - e_set))
 
@@ -458,9 +397,25 @@ def mark(student: List[Posting], expected: List[Posting]) -> Tuple[bool, str]:
     return False, "\n".join(lines)
 
 
-def tag_with_question(postings: List[Posting], q_no: int) -> List[Posting]:
-    tag = f"Q{q_no}"
-    return [Posting(account=p.account, side=p.side, amount=p.amount, narrative=tag) for p in postings]
+def generate_hint(student: List[Posting], expected: List[Posting]) -> Optional[str]:
+    s_acc = sorted([p.account for p in student])
+    e_acc = sorted([p.account for p in expected])
+
+    if sorted(set(s_acc)) == sorted(set(e_acc)):
+        # accounts match but something else wrong
+        s_pairs = sorted((p.account, p.side) for p in student)
+        e_pairs = sorted((p.account, p.side) for p in expected)
+        if sorted(set(a for a, _ in s_pairs)) == sorted(set(a for a, _ in e_pairs)) and s_pairs != e_pairs:
+            return "Hint: You have the right accounts, but one or more are on the wrong side (Dr or Cr)."
+        return "Hint: The right accounts are there, but check the amounts and whether VAT or discounts are treated correctly."
+
+    # VAT hint
+    e_has_vat = any("VAT" in p.account for p in expected)
+    s_has_vat = any("VAT" in p.account for p in student)
+    if e_has_vat and not s_has_vat:
+        return "Hint: This looks like a VAT question. Are you missing VAT input or VAT output?"
+
+    return None
 
 
 # ----------------------------
@@ -468,13 +423,13 @@ def tag_with_question(postings: List[Posting], q_no: int) -> List[Posting]:
 # ----------------------------
 
 st.set_page_config(page_title="Double Entry Game", layout="wide")
-
 st.title("Double Entry Game")
-st.caption("20 rounds, 10 questions per round. Shows the journal entry and the T accounts after each question.")
+st.caption("Dropdown-based journal entry. Live balancing. Shows the journal and the T accounts after each question.")
 
 with st.sidebar:
-    st.header("Round control")
-    round_choice = st.selectbox("Choose round", list(range(1, 21)), index=0)
+    st.header("Round")
+    round_choice = st.selectbox("Choose round (1 to 20)", list(range(1, 21)), index=0)
+
     if st.button("Start new round", type="primary"):
         st.session_state.started = True
         st.session_state.round_no = int(round_choice)
@@ -484,22 +439,20 @@ with st.sidebar:
         st.session_state.attempts = 0
         st.session_state.ledger = Ledger()
         st.session_state.last_message = ""
+        st.session_state.last_feedback = ""
         st.session_state.last_journal = ""
+        st.session_state.lines = 2  # reset per round
         st.session_state.last_correct = None
 
     if st.button("Reset everything"):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
 
-# Initialise state on first load
-if "started" not in st.session_state:
-    st.session_state.started = False
-
-if not st.session_state.started:
+if "started" not in st.session_state or not st.session_state.started:
     st.info("Choose a round in the sidebar, then click Start new round.")
     st.stop()
 
-round_no = st.session_state.round_no
+round_no: int = st.session_state.round_no
 questions: List[Question] = st.session_state.questions
 ledger: Ledger = st.session_state.ledger
 q_index: int = st.session_state.q_index
@@ -516,33 +469,99 @@ with left:
         st.stop()
 
     q = questions[q_index]
+
+    # reset line count sensibly for each new question
+    expected_lines = max(2, min(5, len(q.expected)))
+    if "current_q_index" not in st.session_state or st.session_state.current_q_index != q_index:
+        st.session_state.current_q_index = q_index
+        st.session_state.lines = expected_lines
+
     st.markdown(f"**{q.prompt}**")
 
-    st.markdown("Answer format examples")
-    st.code("Dr Bank 15000; Cr Capital 15000\nDr Utilities expense 1000; Dr VAT input 200; Cr Bank 1200", language="text")
+    accounts = account_options_for_round(round_no)
+    rng = random.Random(5000 + round_no + q_index)
+    amounts = amount_options(q.expected, rng)
 
-    entry = st.text_input("Your journal entry", key=f"entry_{round_no}_{q_index}")
+    st.markdown("Build your journal entry using dropdowns")
+
+    rows: List[Tuple[str, str, int]] = []
+    for i in range(st.session_state.lines):
+        c1, c2, c3 = st.columns([1, 3, 2])
+        with c1:
+            side = st.selectbox(
+                f"Side {i+1}",
+                ["DR", "CR"],
+                key=f"side_{round_no}_{q_index}_{i}"
+            )
+        with c2:
+            account = st.selectbox(
+                f"Account {i+1}",
+                [""] + accounts,
+                key=f"acct_{round_no}_{q_index}_{i}"
+            )
+        with c3:
+            amount = st.selectbox(
+                f"Amount {i+1}",
+                [0] + amounts,
+                format_func=lambda x: "Select amount" if x == 0 else f"£{x:,}",
+                key=f"amt_{round_no}_{q_index}_{i}"
+            )
+
+        if account and amount > 0:
+            rows.append((side, account, amount))
+
+    # live totals
+    dr_total = sum(a for s, _, a in rows if s == "DR")
+    cr_total = sum(a for s, _, a in rows if s == "CR")
+    diff = dr_total - cr_total
+
+    st.markdown("Live balance check")
+    st.write(f"Total debits £{dr_total:,}")
+    st.write(f"Total credits £{cr_total:,}")
+    if diff == 0 and rows:
+        st.success("Balanced")
+    else:
+        st.warning(f"Not balanced. Difference £{abs(diff):,} ({'Dr too high' if diff > 0 else 'Cr too high' if diff < 0 else 'no lines yet'})")
+
+    add_col, remove_col = st.columns([1, 1])
+    with add_col:
+        if st.button("Add a line"):
+            if st.session_state.lines < 6:
+                st.session_state.lines += 1
+                st.rerun()
+    with remove_col:
+        if st.button("Remove a line"):
+            if st.session_state.lines > 2:
+                st.session_state.lines -= 1
+                st.rerun()
 
     col_a, col_b = st.columns([1, 1])
     with col_a:
-        submitted = st.button("Submit entry")
+        submitted = st.button("Submit entry", type="primary")
     with col_b:
         show_answer = st.button("Show model answer and post it")
 
     if submitted:
-        try:
-            student_postings = parse_entry(entry)
-        except Exception as e:
-            st.session_state.last_message = f"Not marked. {e}"
+        # block if not balanced or no valid rows
+        if not rows:
             st.session_state.last_correct = False
+            st.session_state.last_message = "Not marked. Please select at least two lines with accounts and amounts."
+            st.session_state.last_feedback = ""
+        elif dr_total != cr_total:
+            st.session_state.last_correct = False
+            st.session_state.last_message = "Not marked. Your entry must balance before you submit."
+            st.session_state.last_feedback = ""
         else:
+            student_postings = [Posting(account=a, side=s, amount=amt, narrative="") for (s, a, amt) in rows]
             ok, feedback = mark(student_postings, q.expected)
+
             if ok:
                 ledger.post_many(tag_with_question(student_postings, q_index + 1))
                 st.session_state.score += 1
                 st.session_state.last_correct = True
                 st.session_state.last_message = "Correct"
-                st.session_state.last_journal = format_postings_lines(student_postings)
+                st.session_state.last_feedback = ""
+                st.session_state.last_journal = format_journal(student_postings)
 
                 st.session_state.q_index += 1
                 st.session_state.attempts = 0
@@ -551,24 +570,27 @@ with left:
                 st.session_state.attempts += 1
                 st.session_state.last_correct = False
                 st.session_state.last_message = "Not quite"
-                st.session_state.last_journal = ""
                 st.session_state.last_feedback = feedback
+                hint = generate_hint(student_postings, q.expected)
+                if hint:
+                    st.session_state.last_feedback = st.session_state.last_feedback + "\n\n" + hint
 
                 if st.session_state.attempts >= 2:
-                    # Post model answer so learning continues
+                    # post model answer after 2 attempts
                     ledger.post_many(tag_with_question(q.expected, q_index + 1))
                     st.session_state.last_message = "Two attempts used. Model answer posted."
-                    st.session_state.last_journal = format_postings_lines(q.expected)
-
+                    st.session_state.last_journal = format_journal(q.expected)
+                    st.session_state.last_feedback = ""
                     st.session_state.q_index += 1
                     st.session_state.attempts = 0
                     st.rerun()
 
     if show_answer:
         ledger.post_many(tag_with_question(q.expected, q_index + 1))
-        st.session_state.last_message = "Model answer posted."
-        st.session_state.last_journal = format_postings_lines(q.expected)
         st.session_state.last_correct = None
+        st.session_state.last_message = "Model answer posted."
+        st.session_state.last_feedback = ""
+        st.session_state.last_journal = format_journal(q.expected)
 
         st.session_state.q_index += 1
         st.session_state.attempts = 0
@@ -579,18 +601,17 @@ with left:
             st.success(st.session_state.last_message)
         elif st.session_state.last_correct is False:
             st.warning(st.session_state.last_message)
-            if "last_feedback" in st.session_state and st.session_state.last_feedback:
-                st.code(st.session_state.last_feedback, language="text")
         else:
             st.info(st.session_state.last_message)
 
+    if st.session_state.last_feedback:
+        st.code(st.session_state.last_feedback, language="text")
+
     if st.session_state.last_journal:
-        st.markdown("**Double entry posted**")
+        st.markdown("Double entry posted")
         st.code(st.session_state.last_journal, language="text")
 
 with right:
     st.subheader("T accounts")
-    t_text = ledger.render_all_t_accounts(max_accounts=18)
-    st.code(t_text, language="text")
-
-    st.caption("Each posting is labelled Q1, Q2, etc so students can see which question created each entry.")
+    st.code(ledger.render_all_t_accounts(max_accounts=18), language="text")
+    st.caption("Entries are labelled Q1, Q2, etc so students can link each posting to the question.")
