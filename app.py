@@ -1,8 +1,7 @@
 import random
 from dataclasses import dataclass, field
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Union
 
-import pandas as pd
 import streamlit as st
 
 
@@ -12,10 +11,8 @@ import streamlit as st
 
 CSS = """
 <style>
-/* Layout breathing room */
 .main .block-container { padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1200px; }
 
-/* Cards */
 .card {
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
@@ -24,8 +21,6 @@ CSS = """
   margin-bottom: 14px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.20);
 }
-
-.card h3, .card h4 { margin: 0 0 8px 0; }
 
 .small-muted { opacity: 0.75; font-size: 0.92rem; }
 
@@ -37,39 +32,32 @@ CSS = """
   border: 1px solid rgba(255,255,255,0.10);
   font-size: 0.85rem;
   margin-right: 8px;
+  margin-bottom: 6px;
 }
 
 .big-title { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.25rem; }
 .subtitle { opacity: 0.78; margin-top: 0; margin-bottom: 0.75rem; }
 
-/* Code blocks more readable */
 .stCodeBlock code { font-size: 0.9rem; }
-
-/* Sidebar spacing */
 section[data-testid="stSidebar"] .block-container { padding-top: 1.2rem; }
 
-/* Buttons */
 .stButton button {
   border-radius: 10px;
   padding: 0.55rem 0.9rem;
 }
 
-/* Metrics */
-.metric-wrap {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
+.metric-wrap { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
 .metric {
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 12px;
   padding: 10px 12px;
-  min-width: 150px;
+  min-width: 160px;
 }
 .metric .label { opacity: 0.75; font-size: 0.85rem; margin-bottom: 4px; }
 .metric .value { font-size: 1.2rem; font-weight: 700; }
+
+hr { border: none; border-top: 1px solid rgba(255,255,255,0.10); margin: 14px 0; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -129,45 +117,38 @@ class Ledger:
             self.get(p.account).post(p.side, p.amount, p.narrative)
 
     def used_account_names(self) -> List[str]:
-        names = []
+        names: List[str] = []
         for n, a in self.accounts.items():
             if a.debits or a.credits:
                 names.append(n)
         return sorted(names)
 
-    def render_all_t_accounts(self, max_accounts: int = 18) -> str:
+    def trial_balance_rows(self) -> List[Dict[str, Union[str, int]]]:
+        rows: List[Dict[str, Union[str, int]]] = []
+
+        for name in self.used_account_names():
+            side, amt = self.accounts[name].balance()
+            dr = amt if side == "DR" else 0
+            cr = amt if side == "CR" else 0
+            rows.append({"Account": name, "Debit (£)": int(dr), "Credit (£)": int(cr)})
+
+        total_dr = sum(int(r["Debit (£)"]) for r in rows) if rows else 0
+        total_cr = sum(int(r["Credit (£)"]) for r in rows) if rows else 0
+        rows.append({"Account": "TOTAL", "Debit (£)": int(total_dr), "Credit (£)": int(total_cr)})
+        return rows
+
+    def render_all_t_accounts(self, max_accounts: int = 22) -> str:
         names = self.used_account_names()
         if not names:
             return "(No postings yet)"
         names = names[:max_accounts]
         return "\n\n".join(self._render_single_t(self.accounts[n]) for n in names)
 
-    def trial_balance_df(self) -> pd.DataFrame:
-        rows = []
-        for name in self.used_account_names():
-            side, amt = self.accounts[name].balance()
-            dr = amt if side == "DR" else 0
-            cr = amt if side == "CR" else 0
-            rows.append({"Account": name, "Debit (£)": dr, "Credit (£)": cr})
-
-        df = pd.DataFrame(rows)
-        if df.empty:
-            return df
-
-        # Totals row
-        totals = {
-            "Account": "TOTAL",
-            "Debit (£)": int(df["Debit (£)"].sum()),
-            "Credit (£)": int(df["Credit (£)"].sum()),
-        }
-        df = pd.concat([df, pd.DataFrame([totals])], ignore_index=True)
-        return df
-
     @staticmethod
     def _render_single_t(acc: LedgerAccount) -> str:
-        width = 74
-        left_w = 36
-        right_w = 37
+        width = 78
+        left_w = 38
+        right_w = 39
 
         top = f" {acc.name} ".center(width, "=")
         header = f"{'DR'.ljust(left_w)}|{'CR'.ljust(right_w)}"
@@ -176,7 +157,6 @@ class Ledger:
         dr_total, cr_total = acc.totals()
         bal_side, bal_amt = acc.balance()
 
-        # build entry lines
         rows: List[Tuple[str, str]] = []
         max_len = max(len(acc.debits), len(acc.credits))
         for i in range(max_len):
@@ -184,31 +164,31 @@ class Ledger:
             r = ""
             if i < len(acc.debits):
                 nar, amt = acc.debits[i]
-                label = (nar or "").strip()[:18]
-                l = f"{label:18} {amt:>12,}"
+                label = (nar or "").strip()[:22]
+                l = f"{label:22} {amt:>12,}"
             if i < len(acc.credits):
                 nar, amt = acc.credits[i]
-                label = (nar or "").strip()[:18]
-                r = f"{label:18} {amt:>12,}"
+                label = (nar or "").strip()[:22]
+                r = f"{label:22} {amt:>12,}"
             rows.append((l, r))
 
         # add balance c/d so totals agree
         if bal_side and bal_amt:
             if bal_side == "DR":
-                rows.append(("", f"{'Bal c/d':18} {bal_amt:>12,}"))
+                rows.append(("", f"{'Bal c/d':22} {bal_amt:>12,}"))
                 cr_total += bal_amt
             else:
-                rows.append((f"{'Bal c/d':18} {bal_amt:>12,}", ""))
+                rows.append((f"{'Bal c/d':22} {bal_amt:>12,}", ""))
                 dr_total += bal_amt
 
-        rows.append((f"{'Total':18} {dr_total:>12,}", f"{'Total':18} {cr_total:>12,}"))
+        rows.append((f"{'Total':22} {dr_total:>12,}", f"{'Total':22} {cr_total:>12,}"))
 
         # balance b/d line (teaching hint)
         if bal_side and bal_amt:
             if bal_side == "DR":
-                rows.append((f"{'Bal b/d':18} {bal_amt:>12,}", ""))
+                rows.append((f"{'Bal b/d':22} {bal_amt:>12,}", ""))
             else:
-                rows.append(("", f"{'Bal b/d':18} {bal_amt:>12,}"))
+                rows.append(("", f"{'Bal b/d':22} {bal_amt:>12,}"))
 
         rendered = [f"{l.ljust(left_w)}|{r.ljust(right_w)}" for l, r in rows]
         bottom = "=" * width
@@ -225,8 +205,8 @@ class Question:
     expected: List[Posting]
 
 
-def _p(account: str, side: str, amount: int, nar: str) -> Posting:
-    return Posting(account=account, side=side, amount=amount, narrative=nar)
+def _p(account: str, side: str, amount: int) -> Posting:
+    return Posting(account=account, side=side, amount=amount, narrative="")
 
 
 def build_round(round_no: int, n: int = 10) -> List[Question]:
@@ -274,90 +254,90 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
     if diff <= 4:
         templates = [
             ("Owner introduced funds into the business £{x}.",
-             lambda x: [_p(A["BANK"], "DR", x, ""), _p(A["CAP"], "CR", x, "")]),
+             lambda x: [_p(A["BANK"], "DR", x), _p(A["CAP"], "CR", x)]),
             ("Paid rent from bank £{x}.",
-             lambda x: [_p(A["RENT"], "DR", x, ""), _p(A["BANK"], "CR", x, "")]),
+             lambda x: [_p(A["RENT"], "DR", x), _p(A["BANK"], "CR", x)]),
             ("Paid wages from bank £{x}.",
-             lambda x: [_p(A["WAGES"], "DR", x, ""), _p(A["BANK"], "CR", x, "")]),
+             lambda x: [_p(A["WAGES"], "DR", x), _p(A["BANK"], "CR", x)]),
             ("Bought equipment and paid immediately by bank £{x}.",
-             lambda x: [_p(A["EQUIP"], "DR", x, ""), _p(A["BANK"], "CR", x, "")]),
+             lambda x: [_p(A["EQUIP"], "DR", x), _p(A["BANK"], "CR", x)]),
             ("Made a sale and received the money in bank £{x}.",
-             lambda x: [_p(A["BANK"], "DR", x, ""), _p(A["SALES"], "CR", x, "")]),
+             lambda x: [_p(A["BANK"], "DR", x), _p(A["SALES"], "CR", x)]),
         ]
     elif diff <= 8:
         templates = [
             ("Sold goods on credit £{x}.",
-             lambda x: [_p(A["AR"], "DR", x, ""), _p(A["SALES"], "CR", x, "")]),
+             lambda x: [_p(A["AR"], "DR", x), _p(A["SALES"], "CR", x)]),
             ("Bought goods on credit £{x}.",
-             lambda x: [_p(A["PUR"], "DR", x, ""), _p(A["AP"], "CR", x, "")]),
+             lambda x: [_p(A["PUR"], "DR", x), _p(A["AP"], "CR", x)]),
             ("Customer returned goods worth £{x}.",
-             lambda x: [_p(A["RET_IN"], "DR", x, ""), _p(A["AR"], "CR", x, "")]),
+             lambda x: [_p(A["RET_IN"], "DR", x), _p(A["AR"], "CR", x)]),
             ("Returned goods to supplier worth £{x}.",
-             lambda x: [_p(A["AP"], "DR", x, ""), _p(A["RET_OUT"], "CR", x, "")]),
+             lambda x: [_p(A["AP"], "DR", x), _p(A["RET_OUT"], "CR", x)]),
             ("Received money from a customer into bank £{x}.",
-             lambda x: [_p(A["BANK"], "DR", x, ""), _p(A["AR"], "CR", x, "")]),
+             lambda x: [_p(A["BANK"], "DR", x), _p(A["AR"], "CR", x)]),
             ("Paid a supplier from bank £{x}.",
-             lambda x: [_p(A["AP"], "DR", x, ""), _p(A["BANK"], "CR", x, "")]),
+             lambda x: [_p(A["AP"], "DR", x), _p(A["BANK"], "CR", x)]),
         ]
     elif diff <= 12:
         templates = [
             ("Bought utilities, net £{x} plus VAT 20%, paid by bank.",
              lambda x: (lambda net, vat, gross: [
-                 _p(A["UTIL"], "DR", net, ""),
-                 _p(A["VAT_IN"], "DR", vat, ""),
-                 _p(A["BANK"], "CR", gross, "")
+                 _p(A["UTIL"], "DR", net),
+                 _p(A["VAT_IN"], "DR", vat),
+                 _p(A["BANK"], "CR", gross)
              ])(*add_vat(x))),
             ("Made a credit sale, net £{x} plus VAT 20%.",
              lambda x: (lambda net, vat, gross: [
-                 _p(A["AR"], "DR", gross, ""),
-                 _p(A["SALES"], "CR", net, ""),
-                 _p(A["VAT_OUT"], "CR", vat, "")
+                 _p(A["AR"], "DR", gross),
+                 _p(A["SALES"], "CR", net),
+                 _p(A["VAT_OUT"], "CR", vat)
              ])(*add_vat(x))),
             ("Bought goods on credit, net £{x} plus VAT 20%.",
              lambda x: (lambda net, vat, gross: [
-                 _p(A["PUR"], "DR", net, ""),
-                 _p(A["VAT_IN"], "DR", vat, ""),
-                 _p(A["AP"], "CR", gross, "")
+                 _p(A["PUR"], "DR", net),
+                 _p(A["VAT_IN"], "DR", vat),
+                 _p(A["AP"], "CR", gross)
              ])(*add_vat(x))),
             ("Record depreciation for the period £{x}.",
-             lambda x: [_p(A["DEP"], "DR", x, ""), _p(A["ACCDEP"], "CR", x, "")]),
+             lambda x: [_p(A["DEP"], "DR", x), _p(A["ACCDEP"], "CR", x)]),
             ("Allowed a customer discount £{x}.",
-             lambda x: [_p(A["DISC_ALL"], "DR", x, ""), _p(A["AR"], "CR", x, "")]),
+             lambda x: [_p(A["DISC_ALL"], "DR", x), _p(A["AR"], "CR", x)]),
             ("Received a supplier discount £{x}.",
-             lambda x: [_p(A["AP"], "DR", x, ""), _p(A["DISC_REC"], "CR", x, "")]),
+             lambda x: [_p(A["AP"], "DR", x), _p(A["DISC_REC"], "CR", x)]),
         ]
     elif diff <= 16:
         templates = [
             ("At period end, rent of £{x} is owing (accrual).",
-             lambda x: [_p(A["RENT"], "DR", x, ""), _p(A["ACCR"], "CR", x, "")]),
+             lambda x: [_p(A["RENT"], "DR", x), _p(A["ACCR"], "CR", x)]),
             ("At period end, utilities of £{x} were paid in advance (prepayment).",
-             lambda x: [_p(A["PREP"], "DR", x, ""), _p(A["UTIL"], "CR", x, "")]),
+             lambda x: [_p(A["PREP"], "DR", x), _p(A["UTIL"], "CR", x)]),
             ("Write off an irrecoverable debt £{x}.",
-             lambda x: [_p(A["BAD"], "DR", x, ""), _p(A["AR"], "CR", x, "")]),
+             lambda x: [_p(A["BAD"], "DR", x), _p(A["AR"], "CR", x)]),
             ("Create an allowance for doubtful debts £{x}.",
-             lambda x: [_p(A["BAD"], "DR", x, ""), _p(A["ALLOW"], "CR", x, "")]),
+             lambda x: [_p(A["BAD"], "DR", x), _p(A["ALLOW"], "CR", x)]),
             ("Owner took drawings £{x} from bank.",
-             lambda x: [_p(A["DRAW"], "DR", x, ""), _p(A["BANK"], "CR", x, "")]),
+             lambda x: [_p(A["DRAW"], "DR", x), _p(A["BANK"], "CR", x)]),
         ]
     else:
         templates = [
             ("Correct this error: equipment £{x} was wrongly debited to purchases.",
-             lambda x: [_p(A["EQUIP"], "DR", x, ""), _p(A["PUR"], "CR", x, "")]),
+             lambda x: [_p(A["EQUIP"], "DR", x), _p(A["PUR"], "CR", x)]),
             ("A one sided error: bank was credited £{x} but the debit entry was missing. Use suspense.",
-             lambda x: [_p(A["SUSP"], "DR", x, ""), _p(A["BANK"], "CR", x, "")]),
+             lambda x: [_p(A["SUSP"], "DR", x), _p(A["BANK"], "CR", x)]),
             ("Clear suspense: the missing debit was rent expense £{x}.",
-             lambda x: [_p(A["RENT"], "DR", x, ""), _p(A["SUSP"], "CR", x, "")]),
+             lambda x: [_p(A["RENT"], "DR", x), _p(A["SUSP"], "CR", x)]),
             ("Customer pays £{x} and we allow a discount of £{d}.",
              lambda x: (lambda disc: [
-                 _p(A["BANK"], "DR", x, ""),
-                 _p(A["DISC_ALL"], "DR", disc, ""),
-                 _p(A["AR"], "CR", x + disc, "")
+                 _p(A["BANK"], "DR", x),
+                 _p(A["DISC_ALL"], "DR", disc),
+                 _p(A["AR"], "CR", x + disc)
              ])(max(50, x // 10))),
             ("We pay a supplier £{x} and receive a discount of £{d}.",
              lambda x: (lambda disc: [
-                 _p(A["AP"], "DR", x + disc, ""),
-                 _p(A["BANK"], "CR", x, ""),
-                 _p(A["DISC_REC"], "CR", disc, "")
+                 _p(A["AP"], "DR", x + disc),
+                 _p(A["BANK"], "CR", x),
+                 _p(A["DISC_REC"], "CR", disc)
              ])(max(50, x // 10))),
         ]
 
@@ -385,7 +365,7 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
 
 
 # ----------------------------
-# Dropdown options
+# Dropdown option banks
 # ----------------------------
 
 def account_options_for_round(round_no: int) -> List[str]:
@@ -486,32 +466,29 @@ def generate_hint(student: List[Posting], expected: List[Posting]) -> Optional[s
 
 
 # ----------------------------
-# Narrative improvement (from/to contra accounts)
+# Narratives: show from/to contra accounts
 # ----------------------------
 
+def _compact(accounts: List[str], limit: int = 2) -> str:
+    uniq: List[str] = []
+    for a in accounts:
+        if a not in uniq:
+            uniq.append(a)
+    if not uniq:
+        return ""
+    if len(uniq) <= limit:
+        return " & ".join(uniq)
+    return "Various"
+
+
 def annotate_with_from_to(postings: List[Posting], q_no: int) -> List[Posting]:
-    """
-    Adds teaching-friendly narratives:
-      DR lines: "Qn from <credit accounts>"
-      CR lines: "Qn to <debit accounts>"
-    For multi-line entries, it lists the relevant contra side accounts.
-    """
     debits = [p.account for p in postings if p.side.upper() == "DR"]
     credits = [p.account for p in postings if p.side.upper() == "CR"]
 
-    def compact(accounts: List[str], limit: int = 2) -> str:
-        uniq = []
-        for a in accounts:
-            if a not in uniq:
-                uniq.append(a)
-        if len(uniq) <= limit:
-            return " & ".join(uniq)
-        return "Various"
+    cr_text = _compact(credits)
+    dr_text = _compact(debits)
 
-    cr_text = compact(credits)
-    dr_text = compact(debits)
-
-    out = []
+    out: List[Posting] = []
     for p in postings:
         side = p.side.upper()
         if side == "DR":
@@ -533,7 +510,7 @@ def format_journal(postings: List[Posting]) -> str:
 st.set_page_config(page_title="Double Entry Game", layout="wide")
 
 st.markdown('<div class="big-title">Double Entry Game</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Dropdown-based journal entry. Live balancing. T accounts show from and to. Trial balance at the end.</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Dropdown journal entry. Live balancing. T accounts show from and to. Trial balance at the end.</div>', unsafe_allow_html=True)
 
 # Ensure session defaults exist
 defaults = {
@@ -595,22 +572,26 @@ if q_index >= len(questions):
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("Trial balance")
-    tb = ledger.trial_balance_df()
-    if tb.empty:
+    tb_rows = ledger.trial_balance_rows()
+
+    if len(tb_rows) == 1:
         st.write("No postings.")
     else:
-        st.dataframe(tb, use_container_width=True, hide_index=True)
-        total_dr = int(tb.iloc[-1]["Debit (£)"])
-        total_cr = int(tb.iloc[-1]["Credit (£)"])
+        st.dataframe(tb_rows, use_container_width=True, hide_index=True)
+
+        total_dr = int(tb_rows[-1]["Debit (£)"])
+        total_cr = int(tb_rows[-1]["Credit (£)"])
+
         if total_dr == total_cr:
-            st.success(f"Trial balance agrees: £{total_dr:,}")
+            st.success(f"Trial balance agrees £{total_dr:,}")
         else:
-            st.warning(f"Trial balance does not agree. Debits £{total_dr:,}, Credits £{total_cr:,}")
+            st.warning(f"Trial balance does not agree. Debits £{total_dr:,}. Credits £{total_cr:,}.")
+
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("T accounts")
-    st.code(ledger.render_all_t_accounts(max_accounts=24), language="text")
+    st.code(ledger.render_all_t_accounts(max_accounts=28), language="text")
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.stop()
@@ -620,7 +601,12 @@ left, right = st.columns([1.05, 0.95])
 
 with left:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown(f'<span class="pill">Round {round_no}</span><span class="pill">Question {q_index + 1} of 10</span>', unsafe_allow_html=True)
+
+    st.markdown(
+        f'<span class="pill">Round {round_no}</span>'
+        f'<span class="pill">Question {q_index + 1} of 10</span>',
+        unsafe_allow_html=True
+    )
 
     st.markdown('<div class="metric-wrap">', unsafe_allow_html=True)
     st.markdown(f"""
@@ -642,12 +628,11 @@ with left:
         st.session_state.attempts = 0
 
     st.markdown(f"### {q.prompt}")
+    st.markdown('<div class="small-muted">Build your journal entry using dropdowns</div>', unsafe_allow_html=True)
 
     accounts = account_options_for_round(round_no)
     rng = random.Random(5000 + round_no + q_index)
     amounts = amount_options(q.expected, rng)
-
-    st.markdown('<div class="small-muted">Build your journal entry using dropdowns</div>', unsafe_allow_html=True)
 
     rows: List[Tuple[str, str, int]] = []
     for i in range(st.session_state.lines):
@@ -675,7 +660,6 @@ with left:
         if account and amount > 0:
             rows.append((side, account, amount))
 
-    # live totals
     dr_total = sum(a for s, _, a in rows if s == "DR")
     cr_total = sum(a for s, _, a in rows if s == "CR")
     diff = dr_total - cr_total
@@ -699,13 +683,14 @@ with left:
                 st.session_state.lines -= 1
                 st.rerun()
 
+    st.markdown("<hr>", unsafe_allow_html=True)
+
     col_a, col_b = st.columns([1, 1])
     with col_a:
         submitted = st.button("Submit entry", type="primary")
     with col_b:
         show_answer = st.button("Show model answer and post it")
 
-    # Actions
     if submitted:
         if not rows:
             st.session_state.last_correct = False
@@ -760,7 +745,6 @@ with left:
         st.session_state.attempts = 0
         st.rerun()
 
-    # Feedback
     if st.session_state.get("last_message", ""):
         if st.session_state.last_correct is True:
             st.success(st.session_state.last_message)
@@ -782,5 +766,5 @@ with right:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("T accounts")
     st.markdown('<div class="small-muted">Each line shows where the entry is from or to, based on the contra accounts.</div>', unsafe_allow_html=True)
-    st.code(ledger.render_all_t_accounts(max_accounts=24), language="text")
+    st.code(ledger.render_all_t_accounts(max_accounts=28), language="text")
     st.markdown("</div>", unsafe_allow_html=True)
