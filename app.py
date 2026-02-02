@@ -11,7 +11,7 @@ import streamlit as st
 
 CSS = """
 <style>
-.main .block-container { padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1200px; }
+.main .block-container { padding-top: 1.1rem; padding-bottom: 2rem; max-width: 1200px; }
 
 .card {
   background: rgba(255,255,255,0.04);
@@ -19,10 +19,12 @@ CSS = """
   border-radius: 14px;
   padding: 16px 16px 14px 16px;
   margin-bottom: 14px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.20);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
 }
 
 .small-muted { opacity: 0.75; font-size: 0.92rem; }
+.big-title { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.25rem; }
+.subtitle { opacity: 0.78; margin-top: 0; margin-bottom: 0.75rem; }
 
 .pill {
   display: inline-block;
@@ -35,16 +37,7 @@ CSS = """
   margin-bottom: 6px;
 }
 
-.big-title { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.25rem; }
-.subtitle { opacity: 0.78; margin-top: 0; margin-bottom: 0.75rem; }
-
-.stCodeBlock code { font-size: 0.9rem; }
-section[data-testid="stSidebar"] .block-container { padding-top: 1.2rem; }
-
-.stButton button {
-  border-radius: 10px;
-  padding: 0.55rem 0.9rem;
-}
+.stButton button { border-radius: 10px; padding: 0.55rem 0.9rem; }
 
 .metric-wrap { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
 .metric {
@@ -58,6 +51,14 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.2rem; }
 .metric .value { font-size: 1.2rem; font-weight: 700; }
 
 hr { border: none; border-top: 1px solid rgba(255,255,255,0.10); margin: 14px 0; }
+
+div[data-testid="stExpander"] details {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 4px 8px;
+}
+div[data-testid="stExpander"] summary { font-weight: 650; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -137,62 +138,60 @@ class Ledger:
         rows.append({"Account": "TOTAL", "Debit (£)": int(total_dr), "Credit (£)": int(total_cr)})
         return rows
 
-    def render_all_t_accounts(self, max_accounts: int = 22) -> str:
-        names = self.used_account_names()
-        if not names:
-            return "(No postings yet)"
-        names = names[:max_accounts]
-        return "\n\n".join(self._render_single_t(self.accounts[n]) for n in names)
-
-    @staticmethod
-    def _render_single_t(acc: LedgerAccount) -> str:
-        width = 78
-        left_w = 38
-        right_w = 39
-
-        top = f" {acc.name} ".center(width, "=")
-        header = f"{'DR'.ljust(left_w)}|{'CR'.ljust(right_w)}"
-        sep = "-" * left_w + "+" + "-" * right_w
-
+    # ---- Visual T accounts: rows for a combined Debit/Credit table ----
+    def t_account_table_rows(self, name: str, include_balance_lines: bool = True) -> List[Dict[str, Union[str, int]]]:
+        acc = self.accounts[name]
         dr_total, cr_total = acc.totals()
         bal_side, bal_amt = acc.balance()
 
-        rows: List[Tuple[str, str]] = []
-        max_len = max(len(acc.debits), len(acc.credits))
-        for i in range(max_len):
-            l = ""
-            r = ""
-            if i < len(acc.debits):
-                nar, amt = acc.debits[i]
-                label = (nar or "").strip()[:22]
-                l = f"{label:22} {amt:>12,}"
-            if i < len(acc.credits):
-                nar, amt = acc.credits[i]
-                label = (nar or "").strip()[:22]
-                r = f"{label:22} {amt:>12,}"
-            rows.append((l, r))
+        debits = list(acc.debits)
+        credits = list(acc.credits)
 
-        # add balance c/d so totals agree
-        if bal_side and bal_amt:
+        rows: List[Dict[str, Union[str, int]]] = []
+
+        max_len = max(len(debits), len(credits))
+        for i in range(max_len):
+            dr_ref, dr_amt = ("", 0)
+            cr_ref, cr_amt = ("", 0)
+
+            if i < len(debits):
+                dr_ref, dr_amt = debits[i]
+            if i < len(credits):
+                cr_ref, cr_amt = credits[i]
+
+            rows.append({
+                "Debit (ref)": dr_ref,
+                "Debit (£)": dr_amt if dr_amt else "",
+                "Credit (ref)": cr_ref,
+                "Credit (£)": cr_amt if cr_amt else ""
+            })
+
+        if include_balance_lines and bal_side and bal_amt:
+            # Bal c/d so totals agree
             if bal_side == "DR":
-                rows.append(("", f"{'Bal c/d':22} {bal_amt:>12,}"))
+                # debit balance means balance carried down appears on credit side
+                rows.append({"Debit (ref)": "", "Debit (£)": "", "Credit (ref)": "Bal c/d", "Credit (£)": bal_amt})
                 cr_total += bal_amt
             else:
-                rows.append((f"{'Bal c/d':22} {bal_amt:>12,}", ""))
+                rows.append({"Debit (ref)": "Bal c/d", "Debit (£)": bal_amt, "Credit (ref)": "", "Credit (£)": ""})
                 dr_total += bal_amt
 
-        rows.append((f"{'Total':22} {dr_total:>12,}", f"{'Total':22} {cr_total:>12,}"))
+        # Totals row
+        rows.append({
+            "Debit (ref)": "Total",
+            "Debit (£)": dr_total,
+            "Credit (ref)": "Total",
+            "Credit (£)": cr_total
+        })
 
-        # balance b/d line (teaching hint)
-        if bal_side and bal_amt:
+        if include_balance_lines and bal_side and bal_amt:
+            # Bal b/d line
             if bal_side == "DR":
-                rows.append((f"{'Bal b/d':22} {bal_amt:>12,}", ""))
+                rows.append({"Debit (ref)": "Bal b/d", "Debit (£)": bal_amt, "Credit (ref)": "", "Credit (£)": ""})
             else:
-                rows.append(("", f"{'Bal b/d':22} {bal_amt:>12,}"))
+                rows.append({"Debit (ref)": "", "Debit (£)": "", "Credit (ref)": "Bal b/d", "Credit (£)": bal_amt})
 
-        rendered = [f"{l.ljust(left_w)}|{r.ljust(right_w)}" for l, r in rows]
-        bottom = "=" * width
-        return "\n".join([top, header, sep, *rendered, bottom])
+        return rows
 
 
 # ----------------------------
@@ -510,7 +509,7 @@ def format_journal(postings: List[Posting]) -> str:
 st.set_page_config(page_title="Double Entry Game", layout="wide")
 
 st.markdown('<div class="big-title">Double Entry Game</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Dropdown journal entry. Live balancing. T accounts show from and to. Trial balance at the end.</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Dropdown journal entry. Live balancing. Responsive T accounts. Trial balance at the end.</div>', unsafe_allow_html=True)
 
 # Ensure session defaults exist
 defaults = {
@@ -591,9 +590,26 @@ if q_index >= len(questions):
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("T accounts")
-    st.code(ledger.render_all_t_accounts(max_accounts=28), language="text")
-    st.markdown("</div>", unsafe_allow_html=True)
+    names = ledger.used_account_names()
+    if not names:
+        st.write("No postings.")
+    else:
+        view = st.selectbox("View", ["All accounts"] + names, index=0)
+        if view == "All accounts":
+            for name in names:
+                side, amt = ledger.accounts[name].balance()
+                bal_text = f"{side} £{amt:,}" if side else "£0"
+                with st.expander(f"{name}  |  Balance {bal_text}", expanded=False):
+                    rows = ledger.t_account_table_rows(name)
+                    st.dataframe(rows, use_container_width=True, hide_index=True)
+        else:
+            side, amt = ledger.accounts[view].balance()
+            bal_text = f"{side} £{amt:,}" if side else "£0"
+            st.markdown(f"**{view}**  |  Balance **{bal_text}**")
+            rows = ledger.t_account_table_rows(view)
+            st.dataframe(rows, use_container_width=True, hide_index=True)
 
+    st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
 # Main layout
@@ -765,6 +781,26 @@ with left:
 with right:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("T accounts")
-    st.markdown('<div class="small-muted">Each line shows where the entry is from or to, based on the contra accounts.</div>', unsafe_allow_html=True)
-    st.code(ledger.render_all_t_accounts(max_accounts=28), language="text")
+    st.markdown('<div class="small-muted">Use the selector to focus on one account on mobile. Expanders keep the page tidy on PC.</div>', unsafe_allow_html=True)
+
+    names = ledger.used_account_names()
+    if not names:
+        st.write("No postings yet.")
+    else:
+        view = st.selectbox("View", ["All accounts"] + names, index=0, key="t_view_in_round")
+
+        if view == "All accounts":
+            for name in names:
+                side, amt = ledger.accounts[name].balance()
+                bal_text = f"{side} £{amt:,}" if side else "£0"
+                with st.expander(f"{name}  |  Balance {bal_text}", expanded=False):
+                    rows = ledger.t_account_table_rows(name)
+                    st.dataframe(rows, use_container_width=True, hide_index=True)
+        else:
+            side, amt = ledger.accounts[view].balance()
+            bal_text = f"{side} £{amt:,}" if side else "£0"
+            st.markdown(f"**{view}**  |  Balance **{bal_text}**")
+            rows = ledger.t_account_table_rows(view)
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+
     st.markdown("</div>", unsafe_allow_html=True)
