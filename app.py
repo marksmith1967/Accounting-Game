@@ -6,12 +6,12 @@ import streamlit as st
 
 
 # ----------------------------
-# Better visuals (safe CSS)
+# Visuals (safe CSS)
 # ----------------------------
 
 CSS = """
 <style>
-.main .block-container { padding-top: 1.1rem; padding-bottom: 2rem; max-width: 1200px; }
+.main .block-container { padding-top: 1.05rem; padding-bottom: 2rem; max-width: 1200px; }
 
 .card {
   background: rgba(255,255,255,0.04);
@@ -22,9 +22,9 @@ CSS = """
   box-shadow: 0 8px 24px rgba(0,0,0,0.18);
 }
 
+.big-title { font-size: 1.35rem; font-weight: 750; margin-bottom: 0.2rem; }
+.subtitle { opacity: 0.8; margin-top: 0; margin-bottom: 0.9rem; }
 .small-muted { opacity: 0.75; font-size: 0.92rem; }
-.big-title { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.25rem; }
-.subtitle { opacity: 0.78; margin-top: 0; margin-bottom: 0.75rem; }
 
 .pill {
   display: inline-block;
@@ -48,7 +48,7 @@ CSS = """
   min-width: 160px;
 }
 .metric .label { opacity: 0.75; font-size: 0.85rem; margin-bottom: 4px; }
-.metric .value { font-size: 1.2rem; font-weight: 700; }
+.metric .value { font-size: 1.2rem; font-weight: 750; }
 
 hr { border: none; border-top: 1px solid rgba(255,255,255,0.10); margin: 14px 0; }
 
@@ -126,7 +126,6 @@ class Ledger:
 
     def trial_balance_rows(self) -> List[Dict[str, Union[str, int]]]:
         rows: List[Dict[str, Union[str, int]]] = []
-
         for name in self.used_account_names():
             side, amt = self.accounts[name].balance()
             dr = amt if side == "DR" else 0
@@ -138,9 +137,10 @@ class Ledger:
         rows.append({"Account": "TOTAL", "Debit (£)": int(total_dr), "Credit (£)": int(total_cr)})
         return rows
 
-    # ---- Visual T accounts: rows for a combined Debit/Credit table ----
     def t_account_table_rows(self, name: str, include_balance_lines: bool = True) -> List[Dict[str, Union[str, int]]]:
-        acc = self.accounts[name]
+        # IMPORTANT: using get() makes this safe even if an account doesn't exist yet
+        acc = self.get(name)
+
         dr_total, cr_total = acc.totals()
         bal_side, bal_amt = acc.balance()
 
@@ -148,35 +148,34 @@ class Ledger:
         credits = list(acc.credits)
 
         rows: List[Dict[str, Union[str, int]]] = []
-
         max_len = max(len(debits), len(credits))
+
         for i in range(max_len):
-            dr_ref, dr_amt = ("", 0)
-            cr_ref, cr_amt = ("", 0)
+            dr_ref, dr_amt = ("", "")
+            cr_ref, cr_amt = ("", "")
 
             if i < len(debits):
-                dr_ref, dr_amt = debits[i]
+                dr_ref, a = debits[i]
+                dr_amt = a
             if i < len(credits):
-                cr_ref, cr_amt = credits[i]
+                cr_ref, a = credits[i]
+                cr_amt = a
 
             rows.append({
                 "Debit (ref)": dr_ref,
-                "Debit (£)": dr_amt if dr_amt else "",
+                "Debit (£)": dr_amt,
                 "Credit (ref)": cr_ref,
-                "Credit (£)": cr_amt if cr_amt else ""
+                "Credit (£)": cr_amt
             })
 
         if include_balance_lines and bal_side and bal_amt:
-            # Bal c/d so totals agree
             if bal_side == "DR":
-                # debit balance means balance carried down appears on credit side
                 rows.append({"Debit (ref)": "", "Debit (£)": "", "Credit (ref)": "Bal c/d", "Credit (£)": bal_amt})
                 cr_total += bal_amt
             else:
                 rows.append({"Debit (ref)": "Bal c/d", "Debit (£)": bal_amt, "Credit (ref)": "", "Credit (£)": ""})
                 dr_total += bal_amt
 
-        # Totals row
         rows.append({
             "Debit (ref)": "Total",
             "Debit (£)": dr_total,
@@ -185,7 +184,6 @@ class Ledger:
         })
 
         if include_balance_lines and bal_side and bal_amt:
-            # Bal b/d line
             if bal_side == "DR":
                 rows.append({"Debit (ref)": "Bal b/d", "Debit (£)": bal_amt, "Credit (ref)": "", "Credit (£)": ""})
             else:
@@ -195,7 +193,7 @@ class Ledger:
 
 
 # ----------------------------
-# Question generator
+# Questions
 # ----------------------------
 
 @dataclass(frozen=True)
@@ -364,7 +362,7 @@ def build_round(round_no: int, n: int = 10) -> List[Question]:
 
 
 # ----------------------------
-# Dropdown option banks
+# Dropdown options
 # ----------------------------
 
 def account_options_for_round(round_no: int) -> List[str]:
@@ -503,7 +501,7 @@ def format_journal(postings: List[Posting]) -> str:
 
 
 # ----------------------------
-# Streamlit app
+# App
 # ----------------------------
 
 st.set_page_config(page_title="Double Entry Game", layout="wide")
@@ -511,7 +509,7 @@ st.set_page_config(page_title="Double Entry Game", layout="wide")
 st.markdown('<div class="big-title">Double Entry Game</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Dropdown journal entry. Live balancing. Responsive T accounts. Trial balance at the end.</div>', unsafe_allow_html=True)
 
-# Ensure session defaults exist
+# Session defaults
 defaults = {
     "started": False,
     "last_message": "",
@@ -522,10 +520,19 @@ defaults = {
     "q_index": 0,
     "lines": 2,
     "last_correct": None,
+    "current_q_index": -1,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+# SELF-HEAL: if started=True but core objects missing (common after deploy), reset safely
+required_when_started = ["round_no", "questions", "ledger", "q_index", "score", "attempts"]
+if st.session_state.get("started", False):
+    missing = [k for k in required_when_started if k not in st.session_state]
+    if missing:
+        st.session_state.started = False
+        st.warning("The app refreshed and the game state was reset. Please click Start new round.")
 
 with st.sidebar:
     st.header("Round")
@@ -541,12 +548,15 @@ with st.sidebar:
         st.session_state.score = 0
         st.session_state.attempts = 0
         st.session_state.ledger = Ledger()
+
         st.session_state.last_message = ""
         st.session_state.last_feedback = ""
         st.session_state.last_journal = ""
         st.session_state.lines = 2
         st.session_state.last_correct = None
         st.session_state.current_q_index = -1
+
+        st.rerun()
 
     if st.button("Reset everything"):
         for k in list(st.session_state.keys()):
@@ -557,12 +567,18 @@ if not st.session_state.started:
     st.info("Choose a round in the sidebar, then click Start new round.")
     st.stop()
 
+# Second guard
+if "ledger" not in st.session_state or "questions" not in st.session_state or "round_no" not in st.session_state:
+    st.session_state.started = False
+    st.warning("Session reloaded. Please click Start new round.")
+    st.stop()
+
 round_no: int = st.session_state.round_no
 questions: List[Question] = st.session_state.questions
 ledger: Ledger = st.session_state.ledger
 q_index: int = st.session_state.q_index
 
-# End of round view
+# End-of-round screen
 if q_index >= len(questions):
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader(f"Round {round_no} complete")
@@ -577,10 +593,8 @@ if q_index >= len(questions):
         st.write("No postings.")
     else:
         st.dataframe(tb_rows, use_container_width=True, hide_index=True)
-
         total_dr = int(tb_rows[-1]["Debit (£)"])
         total_cr = int(tb_rows[-1]["Credit (£)"])
-
         if total_dr == total_cr:
             st.success(f"Trial balance agrees £{total_dr:,}")
         else:
@@ -594,26 +608,23 @@ if q_index >= len(questions):
     if not names:
         st.write("No postings.")
     else:
-        view = st.selectbox("View", ["All accounts"] + names, index=0)
+        view = st.selectbox("View", ["All accounts"] + names, index=0, key="t_view_end")
         if view == "All accounts":
             for name in names:
-                side, amt = ledger.accounts[name].balance()
+                side, amt = ledger.get(name).balance()
                 bal_text = f"{side} £{amt:,}" if side else "£0"
                 with st.expander(f"{name}  |  Balance {bal_text}", expanded=False):
-                    rows = ledger.t_account_table_rows(name)
-                    st.dataframe(rows, use_container_width=True, hide_index=True)
+                    st.dataframe(ledger.t_account_table_rows(name), use_container_width=True, hide_index=True)
         else:
-            side, amt = ledger.accounts[view].balance()
+            side, amt = ledger.get(view).balance()
             bal_text = f"{side} £{amt:,}" if side else "£0"
             st.markdown(f"**{view}**  |  Balance **{bal_text}**")
-            rows = ledger.t_account_table_rows(view)
-            st.dataframe(rows, use_container_width=True, hide_index=True)
-
+            st.dataframe(ledger.t_account_table_rows(view), use_container_width=True, hide_index=True)
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
 # Main layout
-left, right = st.columns([1.05, 0.95])
+left, right = st.columns([1.08, 0.92])
 
 with left:
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -654,23 +665,15 @@ with left:
     for i in range(st.session_state.lines):
         c1, c2, c3 = st.columns([1, 3, 2])
         with c1:
-            side = st.selectbox(
-                f"Side {i+1}",
-                ["DR", "CR"],
-                key=f"side_{round_no}_{q_index}_{i}"
-            )
+            side = st.selectbox(f"Side {i+1}", ["DR", "CR"], key=f"side_{round_no}_{q_index}_{i}")
         with c2:
-            account = st.selectbox(
-                f"Account {i+1}",
-                [""] + accounts,
-                key=f"acct_{round_no}_{q_index}_{i}"
-            )
+            account = st.selectbox(f"Account {i+1}", [""] + accounts, key=f"acct_{round_no}_{q_index}_{i}")
         with c3:
             amount = st.selectbox(
                 f"Amount {i+1}",
                 [0] + amounts,
                 format_func=lambda x: "Select amount" if x == 0 else f"£{x:,}",
-                key=f"amt_{round_no}_{q_index}_{i}"
+                key=f"amt_{round_no}_{q_index}_{i}",
             )
 
         if account and amount > 0:
@@ -781,26 +784,24 @@ with left:
 with right:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("T accounts")
-    st.markdown('<div class="small-muted">Use the selector to focus on one account on mobile. Expanders keep the page tidy on PC.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="small-muted">Mobile tip: choose one account. PC tip: use “All accounts” and expand.</div>', unsafe_allow_html=True)
 
     names = ledger.used_account_names()
     if not names:
         st.write("No postings yet.")
     else:
-        view = st.selectbox("View", ["All accounts"] + names, index=0, key="t_view_in_round")
+        view = st.selectbox("View", ["All accounts"] + names, index=0, key="t_view_midround")
 
         if view == "All accounts":
             for name in names:
-                side, amt = ledger.accounts[name].balance()
+                side, amt = ledger.get(name).balance()
                 bal_text = f"{side} £{amt:,}" if side else "£0"
                 with st.expander(f"{name}  |  Balance {bal_text}", expanded=False):
-                    rows = ledger.t_account_table_rows(name)
-                    st.dataframe(rows, use_container_width=True, hide_index=True)
+                    st.dataframe(ledger.t_account_table_rows(name), use_container_width=True, hide_index=True)
         else:
-            side, amt = ledger.accounts[view].balance()
+            side, amt = ledger.get(view).balance()
             bal_text = f"{side} £{amt:,}" if side else "£0"
             st.markdown(f"**{view}**  |  Balance **{bal_text}**")
-            rows = ledger.t_account_table_rows(view)
-            st.dataframe(rows, use_container_width=True, hide_index=True)
+            st.dataframe(ledger.t_account_table_rows(view), use_container_width=True, hide_index=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
